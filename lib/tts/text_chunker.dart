@@ -1,0 +1,211 @@
+/// 文本分句/分词(需求 4:模拟流式 TTS)。
+///
+/// 流程:按句末标点切句 → 合并过短句 → 超长句用 jieba 词边界二次切块。
+/// 每个片段记录其在**归一化文本**中的起止区间,供朗读视图高亮与
+/// 原文视图回映射使用。
+library;
+
+import 'package:jieba_flutter/analysis/jieba_segmenter.dart';
+
+/// 一个待合成的文本片段。
+class TtsSegment {
+  const TtsSegment({
+    required this.text,
+    required this.start,
+    required this.end,
+  });
+
+  /// 归一化后的朗读文本。
+  final String text;
+
+  /// 在归一化文本中的起始偏移。
+  final int start;
+  final int end;
+
+  int get length => end - start;
+
+  @override
+  String toString() => 'TtsSegment[$start,$end): $text';
+}
+
+class TextChunker {
+  TextChunker({
+    int maxSegmentLen = 60,
+    int minSegmentLen = 6,
+    this.enableJieba = true,
+  })  : _maxLen = maxSegmentLen,
+        _minLen = minSegmentLen;
+
+  final int _maxLen;
+  final int _minLen;
+
+  /// 是否启用 jieba 长句切块(false 时跳过词典加载,测试用)。
+  final bool enableJieba;
+
+  JiebaSegmenter? _seg;
+  bool _jiebaReady = false;
+
+  /// 是否已加载 jieba 词典(约 5MB,惰性加载)。
+  bool get jiebaReady => _jiebaReady;
+
+  /// 加载 jieba 词典;失败则降级为纯字符切块。
+  Future<void> ensureInitialized() async {
+    if (!enableJieba) return;
+    if (_jiebaReady) return;
+    try {
+      await JiebaSegmenter.init();
+      _seg = JiebaSegmenter();
+      _jiebaReady = true;
+    } catch (_) {
+      _jiebaReady = false;
+    }
+  }
+
+  /// 句子结束标点(含换行)。
+  static const String _sentenceBreaks = '。！？；;.!?…\n';
+
+  static bool _isSentenceBreak(String ch) => _sentenceBreaks.contains(ch);
+
+  static bool _isCjk(String ch) {
+    final code = ch.codeUnitAt(0);
+    return (code >= 0x4E00 && code <= 0x9FFF) ||
+        (code >= 0x3400 && code <= 0x4DBF);
+  }
+
+  /// 对归一化文本分句。
+  List<TtsSegment> chunk(String text) {
+    final sentences = _splitSentences(text);
+    final merged = _mergeShort(sentences);
+    final out = <TtsSegment>[];
+    for (final s in merged) {
+      if (s.length > _maxLen && _jiebaReady && _seg != null) {
+        out.addAll(_subsplit(s));
+      } else {
+        out.add(s);
+      }
+    }
+    return out.isEmpty ? [TtsSegment(text: text, start: 0, end: text.length)] : out;
+  }
+
+  List<TtsSegment> _splitSentences(String text) {
+    final out = <TtsSegment>[];
+    final sb = StringBuffer();
+    var start = 0;
+
+    void flush(int end) {
+      if (sb.isNotEmpty) {
+        out.add(TtsSegment(text: sb.toString(), start: start, end: end));
+        sb.clear();
+      }
+    }
+
+    for (var i = 0; i < text.length; i++) {
+      final ch = text[i];
+      sb.write(ch);
+      if (_isSentenceBreak(ch)) {
+        flush(i + 1);
+        start = i + 1;
+      }
+    }
+    flush(text.length);
+    return out;
+  }
+
+  List<TtsSegment> _mergeShort(List<TtsSegment> segments) {
+    final out = <TtsSegment>[];
+    for (final seg in segments) {
+      if (out.isNotEmpty && seg.length < _minLen) {
+        final last = out.removeLast();
+        out.add(TtsSegment(
+          text: '${last.text}${seg.text}',
+          start: last.start,
+          end: seg.end,
+        ));
+      } else {
+        out.add(seg);
+      }
+    }
+    return out;
+  }
+
+  /// 用 jieba 词边界把超长句切成 <= _maxLen 的片段。
+  List<TtsSegment> _subsplit(TtsSegment seg) {
+    final text = seg.text;
+    final cuts = _safeCutPositions(text);
+    if (cuts.length <= 1) {
+      // 没有可切分边界,直接整段。
+      return [seg];
+    }
+
+    final out = <TtsSegment>[];
+    var chunkStart = 0;
+    while (chunkStart < text.length) {
+      var chunkEnd = chunkStart + _maxLen;
+      if (chunkEnd >= text.length) {
+        chunkEnd = text.length;
+      } else {
+        final cut = _lastCutAtOrBefore(cuts, chunkEnd);
+        if (cut > chunkStart) chunkEnd = cut;
+      }
+      out.add(TtsSegment(
+        text: text.substring(chunkStart, chunkEnd),
+        start: seg.start + chunkStart,
+        end: seg.start + chunkEnd,
+      ));
+      chunkStart = chunkEnd;
+    }
+    return out;
+  }
+
+  /// 收集"可以安全切分"的文本位置(词边界)。
+  List<int> _safeCutPositions(String text) {
+    final cuts = <int>[];
+    var i = 0;
+    while (i < text.length) {
+      if (_isCjk(text[i])) {
+        final runStart = i;
+        while (i < text.length && _isCjk(text[i])) {
+          i++;
+        }
+        final run = text.substring(runStart, i);
+        var pos = runStart;
+        var wordCount = 0;
+        try {
+          for (final word in _seg!.sentenceProcess(run)) {
+            pos += word.length;
+            cuts.add(pos);
+            wordCount++;
+          }
+        } catch (_) {
+          wordCount = 0;
+        }
+        if (wordCount == 0) cuts.add(i);
+      } else {
+        // 非 CJK(英文/数字):不在其中间切开,只在整段结束时切。
+        while (i < text.length && !_isCjk(text[i])) {
+          i++;
+        }
+        cuts.add(i);
+      }
+    }
+    if (cuts.isEmpty || cuts.last != text.length) cuts.add(text.length);
+    return cuts;
+  }
+
+  static int _lastCutAtOrBefore(List<int> cuts, int bound) {
+    // cuts 升序,找 <= bound 的最大值。
+    var lo = 0;
+    var hi = cuts.length - 1;
+    var result = cuts.first;
+    while (lo <= hi) {
+      final mid = (lo + hi) ~/ 2;
+      if (cuts[mid] <= bound) {
+        result = cuts[mid];
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return result;
+  }
+}

@@ -1,0 +1,66 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tts_demo/tts/text_normalizer.dart';
+
+void main() {
+  group('TextNormalizer 基本数字', () {
+    final n = TextNormalizer();
+
+    test('整数转中文读法', () {
+      expect(n.normalize('25').text, '二十五');
+      expect(n.normalize('100').text, '一百');
+      expect(n.normalize('200').text, '二百');
+      expect(n.normalize('2000').text, '两千');
+      expect(n.normalize('9999').text, '九千九百九十九');
+    });
+
+    test('小数转中文读法', () {
+      expect(n.normalize('12.5').text, '十二点五');
+      expect(n.normalize('1.05').text, '一点零五');
+    });
+
+    test('负数', () {
+      expect(n.normalize('-5').text, '负五');
+    });
+
+    test('百分比', () {
+      expect(n.normalize('50%').text, '百分之五十');
+      expect(n.normalize('12.5%').text, '百分之十二点五');
+    });
+
+    test('年份逐位读法', () {
+      expect(n.normalize('2024年').text, '二零二四年');
+      expect(n.normalize('1999年').text, '一九九九年');
+    });
+
+    test('金额保留单位', () {
+      expect(n.normalize('10元').text, '十元');
+      expect(n.normalize('价格12.5元').text, '价格十二点五元');
+    });
+
+    test('电话上下文逐位读法', () {
+      expect(n.normalize('拨打110').text, '拨打一一零');
+      expect(n.normalize('电话13800138000').text, '电话一三八零零一三八零零零');
+    });
+
+    test('长数字串逐位读法', () {
+      expect(n.normalize('12345678901').text, '一二三四五六七八九零一');
+    });
+
+    test('前导零按编码读', () {
+      expect(n.normalize('007').text, '零零七');
+    });
+
+    test('全角数字转半角后归一化', () {
+      expect(n.normalize('２５').text, '二十五');
+    });
+
+    test('sourceMap 可将归一化区间映射回原文', () {
+      final r = n.normalize('今天是2024年');
+      expect(r.text, '今天是二零二四年');
+      // 归一化文本中"二零二四"对应原文 "2024" 起始下标 3。
+      final (s, e) = r.toSourceRange(3, 7);
+      expect(s, 3);
+      expect(e, 7);
+    });
+  });
+}
