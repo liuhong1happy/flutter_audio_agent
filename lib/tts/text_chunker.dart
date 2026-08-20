@@ -7,6 +7,8 @@ library;
 
 import 'package:jieba_flutter/analysis/jieba_segmenter.dart';
 
+import 'text_normalizer.dart';
+
 /// 一个待合成的文本片段。
 class TtsSegment {
   const TtsSegment({
@@ -26,6 +28,39 @@ class TtsSegment {
 
   @override
   String toString() => 'TtsSegment[$start,$end): $text';
+}
+
+/// 一次输入(一条气泡)的完整记录。
+///
+/// 气泡 = 用户一次输入的**整段文本**,而不是逐句。合成时按句分块,
+/// 但展示上是一条气泡,内部做逐词高亮。
+class Utterance {
+  const Utterance({
+    required this.originalText,
+    required this.normalizedText,
+    required this.segments,
+    required this.segmentWords,
+    required this.allWords,
+    this.normalization,
+  });
+
+  /// 用户原始输入。
+  final String originalText;
+
+  /// 归一化后(用于朗读展示与逐词高亮)。
+  final String normalizedText;
+
+  /// 分句结果。
+  final List<TtsSegment> segments;
+
+  /// 每段的词级切分(与 [segments] 平行,offset 基于段内文本)。
+  final List<List<WordSpan>> segmentWords;
+
+  /// 整段归一化文本的词级切分(offset 基于 [normalizedText])。
+  final List<WordSpan> allWords;
+
+  /// 归一化结果(原文视图回映射用)。
+  final NormalizationResult? normalization;
 }
 
 /// 片段内的一个词(用于逐词高亮)。

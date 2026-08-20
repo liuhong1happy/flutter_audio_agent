@@ -82,6 +82,7 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
   int _head = 0;
   bool _timerActive = false;
   bool _paused = false;
+  Timer? _currentTimer;
   int pauseCount = 0;
   int resumeCount = 0;
 
@@ -90,6 +91,13 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
 
   @override
   void Function()? onQueueDrained;
+
+  /// 取消挂起的定时器,避免测试结束时 "pending timer"。
+  void _cancelTimer() {
+    _currentTimer?.cancel();
+    _currentTimer = null;
+    _timerActive = false;
+  }
 
   @override
   void enqueue({required int segmentIndex, required Uint8List wavBytes}) {
@@ -100,11 +108,10 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
   void _pump() {
     if (_head >= enqueuedSegmentIndexes.length) {
       _timerActive = false;
-      onQueueDrained?.call();
       return;
     }
     _timerActive = true;
-    Timer(delayPerSegment, () {
+    _currentTimer = Timer(delayPerSegment, () {
       if (_paused) {
         _timerActive = false;
         return;
@@ -112,7 +119,16 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
       startedSegmentIndexes.add(enqueuedSegmentIndexes[_head]);
       onSegmentStarted?.call(enqueuedSegmentIndexes[_head]);
       _head++;
-      _pump();
+      if (_head >= enqueuedSegmentIndexes.length) {
+        // 最后一段:再"播放"一个时长后 drain,让词高亮有机会推进。
+        _timerActive = true;
+        _currentTimer = Timer(delayPerSegment, () {
+          _timerActive = false;
+          onQueueDrained?.call();
+        });
+      } else {
+        _pump();
+      }
     });
   }
 
@@ -131,8 +147,8 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
 
   @override
   Future<void> stop() async {
+    _cancelTimer();
     _head = enqueuedSegmentIndexes.length;
-    _timerActive = false;
     _paused = false;
   }
 

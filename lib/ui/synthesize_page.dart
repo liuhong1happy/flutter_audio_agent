@@ -28,7 +28,6 @@ class SynthesizePage extends StatefulWidget {
 
 class _SynthesizePageState extends State<SynthesizePage> {
   final TextEditingController _textController = TextEditingController();
-  bool _showNormalized = true;
 
   @override
   void dispose() {
@@ -45,7 +44,11 @@ class _SynthesizePageState extends State<SynthesizePage> {
     await service.speak(text);
     if (service.phase == StreamingPhase.error) {
       _showError(service.lastError);
+      return;
     }
+    // 发送成功:清空输入框。
+    _textController.clear();
+    if (mounted) setState(() {});
   }
 
   void _showMessage(String msg) {
@@ -85,21 +88,6 @@ class _SynthesizePageState extends State<SynthesizePage> {
             ready: modelReady,
             modelName: selectedModel?.displayName,
           ),
-          if (service.segments.isNotEmpty)
-            PopupMenuButton<String>(
-              tooltip: '显示方式',
-              icon: const Icon(Icons.tune),
-              onSelected: (v) => setState(
-                () => _showNormalized = v == 'normalized',
-              ),
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'normalized',
-                  child: Text('朗读文本'),
-                ),
-                const PopupMenuItem(value: 'original', child: Text('原文')),
-              ],
-            ),
         ],
       ),
       body: SafeArea(
@@ -107,15 +95,11 @@ class _SynthesizePageState extends State<SynthesizePage> {
           children: [
             Expanded(
               child: SpeakingBubblesView(
-                segments: service.segments,
-                segmentWords: service.segmentWords,
-                currentSegment: service.currentSegment,
+                utterances: service.utterances,
+                activeIndex: service.activeIndex,
                 currentWordIndex: service.currentWordIndex,
-                originalText: service.rawText,
-                normalization: service.normalization,
-                showNormalized: _showNormalized,
                 autoScroll: settings.autoScroll,
-                onReplaySegment: (i) => service.replaySegment(i),
+                onReplay: (i) => service.replayUtterance(i),
               ),
             ),
             _PlaybackControlBar(
