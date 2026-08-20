@@ -16,11 +16,14 @@ import '../test/support/fakes.dart';
 Future<AppDependencies> buildPatrolTestDeps() async {
   final tempDir = Directory.systemTemp.createTempSync('patrol_');
   final deps = AppDependencies(
-    engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 20)),
+    // 放慢合成/播放节奏,让"播放中"状态与高亮推进可被测试观测到。
+    engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 500)),
     downloader: FakeModelDownloader(),
     chunker: TextChunker(enableJieba: false),
     extractor: const ArchiveExtractor(useCompute: false),
-    player: FakeAudioPlaybackQueue(),
+    player: FakeAudioPlaybackQueue(
+      delayPerSegment: const Duration(milliseconds: 700),
+    ),
     modelsDirProvider: () async => Directory('${tempDir.path}/models'),
     audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
   );

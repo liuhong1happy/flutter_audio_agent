@@ -108,6 +108,21 @@ patrol test -t patrol_test/model_manage_test.dart
 - **iOS**:patrol 的 iOS UI 测试目标需在 macOS + Xcode 上配置(骨架见
   `ios/RunnerUITests/RunnerUITests.m`),本仓库已含该文件。
 
+#### 截图
+
+测试内通过 `patrol_test/screenshot_helper.dart` 的 `takeScreenshot(tester, name)`
+用 `RepaintBoundary` + `toImage()` 把当前界面保存为 PNG,写入应用文档目录
+`.../app_flutter/screenshots/<name>.png`。跑完测试后用 `--no-uninstall` 保留 App 再拉取:
+
+```bash
+patrol test -t patrol_test/app_smoke_test.dart -d emulator-5554 --no-uninstall
+# 拉取截图(Windows,替换包名为你的 applicationId)
+adb exec-out run-as com.example.flutter_tts_demo cat app_flutter/screenshots/01_home.png > 01_home.png
+```
+
+> `clearPackageData` 会在每次测试前清空应用数据,因此每轮测试的截图是独立的一套;
+> 需要保留截图时请使用 `--no-uninstall`(否则测试结束 App 被卸载,截图一并消失)。
+
 ## 平台说明
 
 - **Android**:minSdk 由 Flutter 默认(21+);sherpa-onnx 通过 federated 插件打包原生 `.so`。

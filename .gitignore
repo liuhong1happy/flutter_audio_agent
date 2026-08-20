@@ -6,6 +6,12 @@
 .DS_Store
 .atom/
 .build/
+
+# Patrol 测试在设备上生成的截图(每次运行重新生成)
+/screenshots/
+
+# Patrol CLI 生成的测试入口(由 patrol test 自动生成,勿提交)
+/patrol_test/test_bundle.dart
 .buildlog/
 .history
 .svn/
