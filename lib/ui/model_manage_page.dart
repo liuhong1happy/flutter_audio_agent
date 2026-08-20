@@ -9,6 +9,8 @@ import 'package:provider/provider.dart';
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
 import '../models/tts_model.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_text.dart';
 
 class ModelManagePage extends StatefulWidget {
   const ModelManagePage({super.key});
@@ -58,7 +60,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
                   padding: const EdgeInsets.only(right: 12),
                   child: Text(
                     '占用 ${mb.toStringAsFixed(1)}MB',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: AppText.caption.copyWith(color: AppColors.inkTertiary),
                   ),
                 ),
               );
@@ -122,7 +124,7 @@ class _ModelTile extends StatelessWidget {
     if (isDownloaded) {
       trailing = IconButton(
         tooltip: '删除模型',
-        icon: const Icon(Icons.delete_outline, color: Colors.red),
+        icon: const Icon(Icons.delete_outline, color: AppColors.danger),
         onPressed: () => manager.removeModel(model),
       );
     } else if (isDownloading) {
@@ -136,7 +138,7 @@ class _ModelTile extends StatelessWidget {
           ),
           IconButton(
             tooltip: '取消下载',
-            icon: const Icon(Icons.cancel_outlined),
+            icon: const Icon(Icons.close),
             onPressed: () => manager.cancelDownload(model),
           ),
         ],
@@ -150,12 +152,13 @@ class _ModelTile extends StatelessWidget {
 
     return ListTile(
       leading: const Icon(Icons.model_training_outlined),
-      title: Text(model.displayName),
+      title: Text(model.displayName, style: AppText.bodyStrong),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             model.description,
+            style: AppText.caption.copyWith(color: AppColors.inkSecondary),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -163,12 +166,12 @@ class _ModelTile extends StatelessWidget {
             '${model.sizeLabel} · 采样率 ${(model.sampleRate / 1000).toStringAsFixed(1)}kHz'
             '${model.speakers > 1 ? ' · ${model.speakers} 音色' : ''}'
             ' · ${model.license}',
-            style: Theme.of(context).textTheme.bodySmall,
+            style: AppText.caption.copyWith(color: AppColors.inkTertiary),
           ),
           if (state.error != null)
             Text(
               state.error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              style: AppText.caption.copyWith(color: AppColors.danger),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),

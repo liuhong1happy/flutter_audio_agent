@@ -10,6 +10,9 @@ import 'package:provider/provider.dart';
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
 import '../models/tts_settings.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_text.dart';
 
 class TtsSettingsPage extends StatelessWidget {
   const TtsSettingsPage({super.key, this.onNavigateToModel});
@@ -71,7 +74,7 @@ class TtsSettingsPage extends StatelessWidget {
           if (selectedModel == null)
             Text(
               '未选择模型,合成前需要先选择。',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              style: AppText.caption.copyWith(color: AppColors.danger),
             ),
           if (selectedModel != null && selectedModel.speakers > 1) ...[
             const SizedBox(height: 16),
@@ -168,12 +171,10 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Text(
         text,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+        style: AppText.headline.copyWith(color: AppColors.inkPrimary),
       ),
     );
   }

@@ -10,6 +10,9 @@ import 'package:provider/provider.dart';
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
 import '../models/tts_settings.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+import '../theme/app_text.dart';
 import '../tts/tts_streaming_service.dart';
 import 'widgets/speaking_bubbles_view.dart';
 
@@ -105,7 +108,9 @@ class _SynthesizePageState extends State<SynthesizePage> {
             Expanded(
               child: SpeakingBubblesView(
                 segments: service.segments,
+                segmentWords: service.segmentWords,
                 currentSegment: service.currentSegment,
+                currentWordIndex: service.currentWordIndex,
                 originalText: service.rawText,
                 normalization: service.normalization,
                 showNormalized: _showNormalized,
@@ -157,21 +162,21 @@ class _StatusCapsule extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = ready ? Colors.green : Colors.orange;
+    final color = ready ? AppColors.success : AppColors.warn;
     final text = ready
         ? (modelName ?? '已选模型')
         : (modelName == null ? '未选择模型' : '所选模型未下载');
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: Chip(
         avatar: Icon(
-          ready ? Icons.check_circle : Icons.warning_amber,
+          ready ? Icons.check_circle_outline : Icons.warning_amber_outlined,
           size: 16,
           color: color,
         ),
         label: Text(
           text,
-          style: TextStyle(fontSize: 12, color: color),
+          style: AppText.caption.copyWith(color: color),
           overflow: TextOverflow.ellipsis,
         ),
         visualDensity: VisualDensity.compact,
@@ -197,7 +202,6 @@ class _PlaybackControlBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final phaseText = switch (service.phase) {
       StreamingPhase.idle => '就绪',
       StreamingPhase.preparing => '准备中…',
@@ -211,9 +215,12 @@ class _PlaybackControlBar extends StatelessWidget {
     };
 
     return Material(
-      color: scheme.surfaceContainerLow,
+      color: AppColors.surface,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
         child: Row(
           children: [
             IconButton(
@@ -230,16 +237,16 @@ class _PlaybackControlBar extends StatelessWidget {
                 children: [
                   Text(
                     phaseText,
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: AppText.caption,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: AppSpacing.xs),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
                     child: LinearProgressIndicator(
                       value: service.progress,
                       minHeight: 5,
-                      backgroundColor: scheme.surfaceContainerHighest,
+                      backgroundColor: AppColors.hairline,
                     ),
                   ),
                 ],
@@ -280,12 +287,16 @@ class _InputBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      elevation: 8,
-      color: Theme.of(context).colorScheme.surface,
+      color: AppColors.bg,
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.sm,
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -296,20 +307,14 @@ class _InputBar extends StatelessWidget {
                   maxLines: 3,
                   minLines: 1,
                   onChanged: (_) => onChange(),
+                  style: AppText.body,
                   decoration: InputDecoration(
                     hintText: '输入要朗读的文本…',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
                     isDense: true,
                     suffixIcon: isEmpty
                         ? null
                         : IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
+                            icon: const Icon(Icons.close, size: 18),
                             onPressed: () {
                               controller.clear();
                               onChange();
@@ -318,18 +323,12 @@ class _InputBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               FilledButton.icon(
                 key: const ValueKey('speakButton'),
                 onPressed: active ? onStop : onSend,
                 icon: Icon(active ? Icons.stop : Icons.send),
                 label: Text(active ? '停止' : '发送'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                ),
               ),
             ],
           ),

@@ -5,6 +5,8 @@
 // ignore_for_file: prefer_initializing_formals
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/model_catalog.dart';
@@ -44,14 +46,55 @@ class TtsStreamingService extends ChangeNotifier {
         _player = player ?? SequentialAudioPlayer() {
     _player.onSegmentStarted = (index) {
       _currentSegment = index;
+      _startWordTracking(index);
       _notifyPhase();
     };
     _player.onQueueDrained = () {
+      _stopWordTracking();
       if (!_cancelled && _phase != StreamingPhase.error) {
         _phase = StreamingPhase.finished;
         notifyListeners();
       }
     };
+  }
+
+  /// 段开始播放时,按"段音频时长 ∝ 词字符权重"逐词推进高亮。
+  void _startWordTracking(int segmentIndex) {
+    _stopWordTracking();
+    _currentWordIndex = 0;
+    _wordStopwatch
+      ..reset()
+      ..start();
+    _wordTimer = Timer.periodic(const Duration(milliseconds: 60), (_) {
+      final words = _segmentWords.isEmpty ? const <WordSpan>[] : _segmentWords[segmentIndex];
+      final duration = _segmentDurations[segmentIndex] ?? 0;
+      if (words.isEmpty || duration <= 0) return;
+      final realWords = words.where((w) => !w.isSeparator).toList();
+      if (realWords.isEmpty) return;
+      final totalWeight = realWords.fold<int>(0, (s, w) => s + w.weight);
+      final frac =
+          (_wordStopwatch.elapsedMilliseconds / 1000.0 / duration).clamp(0.0, 1.0);
+      var acc = 0;
+      var idx = realWords.length - 1;
+      for (var i = 0; i < realWords.length; i++) {
+        acc += realWords[i].weight;
+        if (frac * totalWeight <= acc) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx != _currentWordIndex) {
+        _currentWordIndex = idx;
+        notifyListeners();
+      }
+    });
+  }
+
+  void _stopWordTracking() {
+    _wordTimer?.cancel();
+    _wordTimer = null;
+    _wordStopwatch.stop();
+    _currentWordIndex = -1;
   }
 
   final TextNormalizer _normalizer;
@@ -76,10 +119,24 @@ class TtsStreamingService extends ChangeNotifier {
   /// 每段已合成 WAV 的缓存(按片段下标),供"气泡重读"复用。
   final Map<int, Uint8List> _segmentWavs = {};
 
+  /// 每段的词级切分(供逐词高亮)。
+  List<List<WordSpan>> _segmentWords = [];
+
+  /// 每段音频时长(秒)。
+  final Map<int, double> _segmentDurations = {};
+
+  /// 当前正在朗读的词(当前片段内的下标,-1 = 未开始)。
+  int _currentWordIndex = -1;
+
+  Timer? _wordTimer;
+  final Stopwatch _wordStopwatch = Stopwatch();
+
   StreamingPhase get phase => _phase;
   List<TtsSegment> get segments => _segments;
   NormalizationResult? get normalization => _normalization;
   int get currentSegment => _currentSegment;
+  int get currentWordIndex => _currentWordIndex;
+  List<List<WordSpan>> get segmentWords => _segmentWords;
   String? get lastError => _lastError;
   String get rawText => _rawText;
 
@@ -122,6 +179,11 @@ class TtsStreamingService extends ChangeNotifier {
       // 2. 分句/分词。
       await _chunker.ensureInitialized();
       _segments = _chunker.chunk(norm.text);
+      _segmentWords = _segments
+          .map((s) => _chunker.splitWords(s.text))
+          .toList();
+      _segmentDurations.clear();
+      _stopWordTracking();
       if (_segments.isEmpty) {
         throw StateError('没有可合成的文本');
       }
@@ -160,6 +222,9 @@ class TtsStreamingService extends ChangeNotifier {
             speed: _settings.speed,
           );
           if (session != _session || _cancelled) break;
+          _segmentDurations[i] = audio.sampleRate > 0
+              ? audio.samples.length / audio.sampleRate
+              : 0;
           final wav = wavBytes(audio.samples, audio.sampleRate);
           _segmentWavs[i] = wav; // 缓存供重读。
           _player.enqueue(segmentIndex: i, wavBytes: wav);
@@ -184,6 +249,8 @@ class TtsStreamingService extends ChangeNotifier {
         _phase != StreamingPhase.synthesizing) {
       return;
     }
+    _wordStopwatch.stop();
+    _wordTimer?.cancel();
     await _player.pause();
     _phase = StreamingPhase.paused;
     notifyListeners();
@@ -192,6 +259,10 @@ class TtsStreamingService extends ChangeNotifier {
   /// 继续朗读。
   Future<void> resume() async {
     if (_phase != StreamingPhase.paused) return;
+    _wordStopwatch.start();
+    if (_wordTimer == null && _currentSegment >= 0) {
+      _startWordTracking(_currentSegment);
+    }
     await _player.resume();
     _phase = StreamingPhase.playing;
     notifyListeners();
@@ -207,6 +278,7 @@ class TtsStreamingService extends ChangeNotifier {
     _cancelled = true;
     await _player.stop();
     _currentSegment = index;
+    _startWordTracking(index);
 
     var wav = _segmentWavs[index];
     if (wav == null) {
@@ -218,6 +290,9 @@ class TtsStreamingService extends ChangeNotifier {
           speed: _settings.speed,
         );
         wav = wavBytes(audio.samples, audio.sampleRate);
+        _segmentDurations[index] = audio.sampleRate > 0
+            ? audio.samples.length / audio.sampleRate
+            : 0;
         _segmentWavs[index] = wav;
       } on Exception {
         _lastError = '第 ${index + 1} 段合成失败';
@@ -236,6 +311,7 @@ class TtsStreamingService extends ChangeNotifier {
   Future<void> stop() async {
     _session++;
     _cancelled = true;
+    _stopWordTracking();
     await _player.stop();
     _phase = StreamingPhase.idle;
     _currentSegment = -1;

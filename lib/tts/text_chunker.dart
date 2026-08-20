@@ -28,6 +28,30 @@ class TtsSegment {
   String toString() => 'TtsSegment[$start,$end): $text';
 }
 
+/// 片段内的一个词(用于逐词高亮)。
+class WordSpan {
+  const WordSpan({
+    required this.text,
+    required this.start,
+    required this.end,
+    this.weight = 1,
+  });
+
+  final String text;
+
+  /// 在片段文本中的起止偏移。
+  final int start;
+  final int end;
+
+  /// 时长权重(按字符数);0 = 分隔符/标点,不高亮。
+  final int weight;
+
+  bool get isSeparator => weight <= 0;
+
+  @override
+  String toString() => 'WordSpan($text[$start,$end],w=$weight)';
+}
+
 class TextChunker {
   TextChunker({
     int maxSegmentLen = 60,
@@ -70,6 +94,92 @@ class TextChunker {
     final code = ch.codeUnitAt(0);
     return (code >= 0x4E00 && code <= 0x9FFF) ||
         (code >= 0x3400 && code <= 0x4DBF);
+  }
+
+  /// 把一句(已归一化)文本切分为词(供逐词高亮)。
+  ///
+  /// CJK 走 jieba 词边界;英文/数字按字母数字串;标点与空白作为
+  /// 权重 0 的分隔符(不高亮)。返回的 [WordSpan] 覆盖整个文本。
+  List<WordSpan> splitWords(String text) {
+    final words = <WordSpan>[];
+    var i = 0;
+    while (i < text.length) {
+      if (_isCjk(text[i])) {
+        final runStart = i;
+        while (i < text.length && _isCjk(text[i])) {
+          i++;
+        }
+        final run = text.substring(runStart, i);
+        var pos = runStart;
+        final jw = _jiebaSplit(run);
+        if (jw.isEmpty) {
+          words.add(WordSpan(
+            text: run,
+            start: runStart,
+            end: i,
+            weight: run.length,
+          ));
+          pos = i;
+        } else {
+          for (final w in jw) {
+            if (pos < i) {
+              words.add(WordSpan(
+                text: w,
+                start: pos,
+                end: pos + w.length,
+                weight: w.length,
+              ));
+              pos += w.length;
+            }
+          }
+        }
+      } else {
+        final runStart = i;
+        while (i < text.length && !_isCjk(text[i])) {
+          i++;
+        }
+        final run = text.substring(runStart, i);
+        final re = RegExp(r'[A-Za-z0-9]+|[^\s]');
+        var lastEnd = 0;
+        for (final m in re.allMatches(run)) {
+          if (m.start > lastEnd) {
+            final sp = run.substring(lastEnd, m.start);
+            words.add(WordSpan(
+              text: sp,
+              start: runStart + lastEnd,
+              end: runStart + m.start,
+              weight: 0,
+            ));
+          }
+          final token = m.group(0)!;
+          words.add(WordSpan(
+            text: token,
+            start: runStart + m.start,
+            end: runStart + m.end,
+            weight: token.length,
+          ));
+          lastEnd = m.end;
+        }
+        if (lastEnd < run.length) {
+          words.add(WordSpan(
+            text: run.substring(lastEnd),
+            start: runStart + lastEnd,
+            end: runStart + run.length,
+            weight: 0,
+          ));
+        }
+      }
+    }
+    return words.isEmpty ? [WordSpan(text: text, start: 0, end: text.length)] : words;
+  }
+
+  List<String> _jiebaSplit(String cjkRun) {
+    if (!_jiebaReady || _seg == null) return const [];
+    try {
+      return _seg!.sentenceProcess(cjkRun);
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// 对归一化文本分句。
