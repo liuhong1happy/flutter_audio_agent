@@ -1,4 +1,4 @@
-package com.example.flutter_tts_demo;
+package top.ued17.tts;
 
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;

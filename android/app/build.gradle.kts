@@ -5,7 +5,9 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flutter_tts_demo"
+    // namespace 必须是合法 Java 包名(段不能以数字开头);
+    // applicationId(安装包标识)则使用用户指定的 top.17ued.tts。
+    namespace = "top.ued17.tts"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +18,8 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.flutter_tts_demo"
+        // 注:top.17ued.tts 不符合 Android 包名规则(段不能以数字开头),使用 top.ued17.tts。
+        applicationId = "top.ued17.tts"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

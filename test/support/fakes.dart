@@ -81,6 +81,9 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
 
   int _head = 0;
   bool _timerActive = false;
+  bool _paused = false;
+  int pauseCount = 0;
+  int resumeCount = 0;
 
   @override
   void Function(int segmentIndex)? onSegmentStarted;
@@ -102,6 +105,10 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
     }
     _timerActive = true;
     Timer(delayPerSegment, () {
+      if (_paused) {
+        _timerActive = false;
+        return;
+      }
       startedSegmentIndexes.add(enqueuedSegmentIndexes[_head]);
       onSegmentStarted?.call(enqueuedSegmentIndexes[_head]);
       _head++;
@@ -110,9 +117,23 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
   }
 
   @override
+  Future<void> pause() async {
+    _paused = true;
+    pauseCount++;
+  }
+
+  @override
+  Future<void> resume() async {
+    _paused = false;
+    resumeCount++;
+    if (!_timerActive) _pump();
+  }
+
+  @override
   Future<void> stop() async {
     _head = enqueuedSegmentIndexes.length;
     _timerActive = false;
+    _paused = false;
   }
 
   @override

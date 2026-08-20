@@ -4,13 +4,15 @@
 
 ## 功能
 
-1. **TTS 模型下载管理** — 内置模型目录,支持下载(进度/取消)、删除、清理全部缓存。
-2. **文本转语音** — 文本框输入 → 归一化 → 分句/分词 → 逐句合成 → 流式顺序播放。
-3. **朗读进度高亮 + 自动滚动** — 正在朗读的片段高亮显示,视图自动滚动跟随(可关闭);
-   支持"朗读视图 / 原文视图"切换。
-4. **自定义应用级 TTS** — 选择模型、多音色说话人 sid、语速、句间静音、推理线程数、下载镜像。
-5. **文本归一化 + 分词模拟流式 TTS** — sherpa-onnx 无流式 API,采用"归一化 → 分句 → 后台
+1. **底部 Tab 布局** — 合成 / 模型 / 设置三个平级 Tab,`IndexedStack` 常驻各页,播放中切换不中断。
+2. **TTS 模型下载管理** — 内置模型目录,支持下载(进度/取消)、删除、清理全部缓存;有下载任务时 Tab 徽标提示。
+3. **文本转语音(聊天式界面)** — 底部输入框,上方逐句朗读气泡;正在读的气泡高亮并自动滚动;
+   **点击气泡可"重新读"该段**;支持朗读文本 / 原文视图切换。
+4. **朗读控制条** — 播放/暂停、进度条、停止常驻。
+5. **自定义应用级 TTS** — 选择模型、多音色说话人 sid、语速、句间静音、推理线程数、下载镜像。
+6. **文本归一化 + 分词模拟流式 TTS** — sherpa-onnx 无流式 API,采用"归一化 → 分句 → 后台
    isolate 逐句合成 → 顺序播放"的方式模拟流式效果。
+7. **本地持久化用 flutter_dva** — `settings` / `downloads` 模型 + `ReduxPersistor` 持久化到 SharedPreferences。
 
 ## 技术栈
 
@@ -22,7 +24,8 @@
 | 分词/分句 | 标点分句 + `jieba_flutter` 长句词边界切块 |
 | 模型下载 | `dio` 流式下载 + `archive` 解压 tar.bz2 |
 | 播放 | `audioplayers`(WAV 顺序播放) |
-| 状态 | `provider` + `ChangeNotifier` |
+| 状态/持久化 | `flutter_dva`(dva 模型 + ReduxPersistor)+ `provider`(运行时 ChangeNotifier) |
+| 应用图标 | `assets/icon/app_icon.svg`(含 TTS 信息)→ PNG,`flutter_launcher_icons` 生成各尺寸 |
 | 集成测试 | `patrol ^4.9.0` |
 
 > 注:`jieba_flutter` 以硬编码路径 `assets/dict.txt` 通过 `rootBundle` 加载词典,
@@ -55,14 +58,17 @@ flutter run            # 需已连接 Android 设备/模拟器(或配置 iOS 模
 
 ```
 lib/
-├── main.dart / app.dart          # 入口与 Provider 装配
+├── main.dart / app.dart          # 入口(initDva + 依赖装配)与 MainShell
 ├── app_dependencies.dart         # 手工 DI(patrol 测试可注入假实现)
-├── models/                       # TtsModel 实体、TtsSettings
+├── dva/                          # flutter_dva:app_models(settings/downloads) + app_dva(initDva)
+├── models/                       # TtsModel 实体、TtsSettings(持久化走 dva)
 ├── data/                         # model_catalog / downloader / extractor / manager / cache
 ├── tts/                          # text_normalizer / text_chunker / tts_engine(isolate) / streaming_service
-└── ui/                           # home / model_manage / tts_settings / streaming_text_view
+└── ui/                           # main_shell / synthesize / model_manage / tts_settings / speaking_bubbles_view
 test/                             # 单元测试 + widget 冒烟(fakes 见 test/support/)
 patrol_test/                      # Patrol 集成测试
+scripts/                          # build-android.sh / build-ios.sh / adhocExportOptions.plist
+assets/icon/                      # app_icon.svg(设计源)+ app_icon.png(1024)
 ```
 
 ## 文本处理管线(需求 4)
@@ -103,7 +109,7 @@ patrol test -t patrol_test/model_manage_test.dart
 
 - Android 原生配置:`android/app/build.gradle.kts` 配了 `PatrolJUnitRunner` +
   AndroidX Test Orchestrator;`MainActivityTest.java` 位于
-  `android/app/src/androidTest/java/com/example/flutter_tts_demo/`。
+  `android/app/src/androidTest/java/top/ued17/tts/`。
 - 测试通过 `patrol_test/test_deps.dart` 注入假下载器/假引擎/假播放器,不依赖真实网络与模型。
 - **iOS**:patrol 的 iOS UI 测试目标需在 macOS + Xcode 上配置(骨架见
   `ios/RunnerUITests/RunnerUITests.m`),本仓库已含该文件。
@@ -117,19 +123,45 @@ patrol test -t patrol_test/model_manage_test.dart
 ```bash
 patrol test -t patrol_test/app_smoke_test.dart -d emulator-5554 --no-uninstall
 # 拉取截图(Windows,替换包名为你的 applicationId)
-adb exec-out run-as com.example.flutter_tts_demo cat app_flutter/screenshots/01_home.png > 01_home.png
+adb exec-out run-as top.ued17.tts cat app_flutter/screenshots/01_home.png > 01_home.png
 ```
 
 > `clearPackageData` 会在每次测试前清空应用数据,因此每轮测试的截图是独立的一套;
 > 需要保留截图时请使用 `--no-uninstall`(否则测试结束 App 被卸载,截图一并消失)。
 
+## 构建脚本
+
+参考 masrobo neme-ai-app 的 `scripts/` 结构:
+
+```bash
+# Android(默认 arm + arm64 APK,可 `--target-platform` 指定)
+sh scripts/build-android.sh
+
+# iOS(需 macOS + Xcode;导出 ad-hoc IPA)
+bash scripts/build-ios.sh
+```
+
+脚本会:清理 build → `flutter build` → 上传蒲公英 → 通知飞书。
+蒲公英/飞书凭据已内置默认值(可被环境变量覆盖):
+`PGYER_API_KEY` / `FEISHU_ACCESS_TOKEN` / `FEISHU_TEMPLATE_ID` / `BUILD_CHANNEL_SHORTCUT`。
+> 注意:凭据位于脚本内,若仓库对外公开请注意轮换。
+
+## 应用图标
+
+- 设计源:`assets/icon/app_icon.svg`(圆角渐变底 + 声波柱 + "TTS" 字样)。
+- 1024 PNG:由 SVG 转换生成(`assets/icon/app_icon.png`)。
+- 各平台图标:运行 `dart run flutter_launcher_icons` 生成 Android mipmap 与 iOS AppIcon。
+
 ## 平台说明
 
-- **Android**:minSdk 由 Flutter 默认(21+);sherpa-onnx 通过 federated 插件打包原生 `.so`。
+- **Android**:applicationId 为 `top.ued17.tts`(注:`top.17ued.tts` 不符合 Android 包名规则
+  ——段不能以数字开头,已作此调整);minSdk 由 Flutter 默认(21+);
+  sherpa-onnx 通过 federated 插件打包原生 `.so`。
   Gradle 依赖在国内网络下的下载问题已通过 `android/settings.gradle.kts` 的阿里云镜像与
   `android/gradle/wrapper/gradle-wrapper.properties` 的腾讯镜像解决。
-- **iOS**:deployment target 13+/A12+;Flutter 3.44 使用 Swift Package Manager 集成插件。
-  Windows 环境无法构建 iOS,请在 macOS 上执行 `flutter build ios` / patrol iOS 测试验证。
+- **iOS**:bundle id `top.ued17.tts`;deployment target 13+/A12+;Flutter 3.44 使用
+  Swift Package Manager 集成插件。Windows 环境无法构建 iOS,请在 macOS 上执行
+  `flutter build ios` / patrol iOS 测试验证。
 
 ## 许可
 

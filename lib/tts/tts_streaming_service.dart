@@ -23,6 +23,7 @@ enum StreamingPhase {
   preparing,
   synthesizing,
   playing,
+  paused,
   finished,
   error,
 }
@@ -71,6 +72,9 @@ class TtsStreamingService extends ChangeNotifier {
 
   /// 会话令牌:每次 speak/stop 递增,用于丢弃过期合成的音频。
   int _session = 0;
+
+  /// 每段已合成 WAV 的缓存(按片段下标),供"气泡重读"复用。
+  final Map<int, Uint8List> _segmentWavs = {};
 
   StreamingPhase get phase => _phase;
   List<TtsSegment> get segments => _segments;
@@ -143,6 +147,7 @@ class TtsStreamingService extends ChangeNotifier {
 
       // 4. 逐句合成入队(后台 isolate,主 isolate 播放不受阻)。
       _phase = StreamingPhase.synthesizing;
+      _segmentWavs.clear();
       notifyListeners();
 
       for (var i = 0; i < _segments.length; i++) {
@@ -156,6 +161,7 @@ class TtsStreamingService extends ChangeNotifier {
           );
           if (session != _session || _cancelled) break;
           final wav = wavBytes(audio.samples, audio.sampleRate);
+          _segmentWavs[i] = wav; // 缓存供重读。
           _player.enqueue(segmentIndex: i, wavBytes: wav);
         } on Exception catch (e) {
           if (session != _session || _cancelled) break;
@@ -172,15 +178,67 @@ class TtsStreamingService extends ChangeNotifier {
     }
   }
 
-  /// 停止朗读并复位。
+  /// 暂停朗读(仅播放中/合成中可暂停)。
+  Future<void> pause() async {
+    if (_phase != StreamingPhase.playing &&
+        _phase != StreamingPhase.synthesizing) {
+      return;
+    }
+    await _player.pause();
+    _phase = StreamingPhase.paused;
+    notifyListeners();
+  }
+
+  /// 继续朗读。
+  Future<void> resume() async {
+    if (_phase != StreamingPhase.paused) return;
+    await _player.resume();
+    _phase = StreamingPhase.playing;
+    notifyListeners();
+  }
+
+  /// 重读某一段(气泡点击)。复用已缓存音频,未缓存则现合成。
+  ///
+  /// 会停止当前整段流水线,只播放指定片段;气泡列表保留。
+  Future<void> replaySegment(int index) async {
+    if (index < 0 || index >= _segments.length) return;
+
+    _session++;
+    _cancelled = true;
+    await _player.stop();
+    _currentSegment = index;
+
+    var wav = _segmentWavs[index];
+    if (wav == null) {
+      try {
+        final seg = _segments[index];
+        final audio = await _engine.generate(
+          text: seg.text,
+          sid: _settings.sid,
+          speed: _settings.speed,
+        );
+        wav = wavBytes(audio.samples, audio.sampleRate);
+        _segmentWavs[index] = wav;
+      } on Exception {
+        _lastError = '第 ${index + 1} 段合成失败';
+        _phase = StreamingPhase.error;
+        notifyListeners();
+        return;
+      }
+    }
+
+    _phase = StreamingPhase.playing;
+    notifyListeners();
+    _player.enqueue(segmentIndex: index, wavBytes: wav);
+  }
+
+  /// 停止播放;保留已分句的气泡列表(可继续重读),下次 speak 时替换。
   Future<void> stop() async {
     _session++;
     _cancelled = true;
     await _player.stop();
     _phase = StreamingPhase.idle;
-    _segments = const [];
     _currentSegment = -1;
-    _normalization = null;
     notifyListeners();
   }
 

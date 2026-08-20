@@ -22,8 +22,8 @@ void main() {
     );
     await takeScreenshot($.tester, '01_home');
 
-    // 进入模型管理页。
-    await $(#modelManageButton).tap();
+    // 切换到"模型"Tab。
+    await $(#tabModel).tap();
     await $.pumpAndSettle();
     await takeScreenshot($.tester, '02_model_list');
 

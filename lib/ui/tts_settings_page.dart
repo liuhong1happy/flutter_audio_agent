@@ -10,10 +10,12 @@ import 'package:provider/provider.dart';
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
 import '../models/tts_settings.dart';
-import 'model_manage_page.dart';
 
 class TtsSettingsPage extends StatelessWidget {
-  const TtsSettingsPage({super.key});
+  const TtsSettingsPage({super.key, this.onNavigateToModel});
+
+  /// "去下载"时回调(由 MainShell 切换到模型 Tab)。
+  final VoidCallback? onNavigateToModel;
 
   @override
   Widget build(BuildContext context) {
@@ -39,9 +41,7 @@ class TtsSettingsPage extends StatelessWidget {
                 title: const Text('尚未下载任何模型'),
                 subtitle: const Text('先到模型管理页下载一个模型,再回来选择。'),
                 trailing: TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ModelManagePage()),
-                  ),
+                  onPressed: () => onNavigateToModel?.call(),
                   child: const Text('去下载'),
                 ),
               ),

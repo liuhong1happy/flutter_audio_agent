@@ -20,6 +20,12 @@ abstract class AudioPlaybackQueue {
   /// 入队一段 WAV 音频。
   void enqueue({required int segmentIndex, required Uint8List wavBytes});
 
+  /// 暂停播放(保留队列与进度)。
+  Future<void> pause();
+
+  /// 继续播放。
+  Future<void> resume();
+
   Future<void> stop();
 
   Future<void> dispose();
@@ -32,6 +38,7 @@ class SequentialAudioPlayer implements AudioPlaybackQueue {
   final AudioPlayer _player;
   final List<_QueuedAudio> _queue = [];
   bool _playing = false;
+  bool _paused = false;
   StreamSubscription<void>? _subscription;
   bool _initialized = false;
 
@@ -54,7 +61,22 @@ class SequentialAudioPlayer implements AudioPlaybackQueue {
   void enqueue({required int segmentIndex, required Uint8List wavBytes}) {
     init();
     _queue.add(_QueuedAudio(segmentIndex: segmentIndex, bytes: wavBytes));
-    if (!_playing) {
+    if (!_playing && !_paused) {
+      _playNext();
+    }
+  }
+
+  @override
+  Future<void> pause() async {
+    _paused = true;
+    await _player.pause();
+  }
+
+  @override
+  Future<void> resume() async {
+    _paused = false;
+    await _player.resume();
+    if (!_playing && _queue.isNotEmpty) {
       _playNext();
     }
   }
@@ -83,6 +105,7 @@ class SequentialAudioPlayer implements AudioPlaybackQueue {
 
   void _onComplete() {
     _playing = false;
+    if (_paused) return; // 暂停时不推进下一段。
     _playNext();
   }
 

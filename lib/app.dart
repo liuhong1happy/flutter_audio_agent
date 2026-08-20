@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app_dependencies.dart';
-import 'ui/home_page.dart';
+import 'ui/main_shell.dart';
 
 class TtsDemoApp extends StatelessWidget {
   const TtsDemoApp({super.key, required this.dependencies});
@@ -27,7 +27,7 @@ class TtsDemoApp extends StatelessWidget {
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
           useMaterial3: true,
         ),
-        home: const HomePage(),
+        home: const MainShell(),
       ),
     );
   }

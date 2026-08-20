@@ -44,6 +44,7 @@ dependencies:
   provider: ^6.1.5+1
   shared_preferences: ^2.5.5
   path: ^1.9.1
+  flutter_dva: ^1.0.9
 
 dev_dependencies:
   flutter_test:
@@ -56,14 +57,15 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   patrol: ^4.9.0
+  flutter_launcher_icons: ^0.14.4
 
 # Patrol 集成测试配置(原生 runner 需要)。
 patrol:
   app_name: Flutter TTS Demo
   android:
-    package_name: com.example.flutter_tts_demo
+    package_name: top.ued17.tts
   ios:
-    bundle_id: com.example.flutterTtsDemo
+    bundle_id: top.ued17.tts
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -81,6 +83,7 @@ flutter:
     # 因此需要把词典复制到应用 assets 中(来源:jieba_flutter 包内 assets/)。
     - assets/dict.txt
     - assets/prob_emit.txt
+    - assets/icon/app_icon.svg
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -112,3 +115,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# 应用图标:由 assets/icon/app_icon.png(源自 app_icon.svg)生成各平台尺寸。
+# 重新生成:`dart run flutter_launcher_icons`
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  remove_alpha_ios: true

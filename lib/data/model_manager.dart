@@ -8,9 +8,11 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dva/flutter_dva.dart';
 import 'package:path/path.dart' as p;
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../dva/app_dva.dart';
+import '../dva/app_models.dart';
 import '../models/tts_model.dart';
 import '../models/tts_settings.dart';
 import 'archive_extractor.dart';
@@ -78,8 +80,6 @@ class ModelManager extends ChangeNotifier {
   final ModelFilesResolver resolver;
   final TtsSettings settings;
 
-  static const _kDownloaded = 'model_manager.downloaded';
-
   final Map<String, ModelDownloadState> _states = {};
   final Map<String, CancelToken> _cancelTokens = {};
 
@@ -90,6 +90,10 @@ class ModelManager extends ChangeNotifier {
 
   ModelDownloadState stateOf(TtsModel model) =>
       _states[model.id] ?? const ModelDownloadState();
+
+  /// 是否有正在下载/解压的模型(用于 Tab 徽标)。
+  bool get hasActiveDownloads => _states.values.any((s) => s.isDownloading ||
+      s.status == DownloadStatus.extracting);
 
   /// 模型根目录:解压内容所在目录。
   String modelUnpackedDir(TtsModel model) =>
@@ -107,8 +111,11 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    _downloaded = prefs.getStringList(_kDownloaded)?.toSet() ?? {};
+    final store = dvaStore();
+    if (store != null) {
+      final d = store.getStateByKey<DownloadsState>('downloads');
+      _downloaded = d.downloadedIds.toSet();
+    }
     notifyListeners();
   }
 
@@ -243,8 +250,12 @@ class ModelManager extends ChangeNotifier {
   }
 
   Future<void> _persistDownloaded() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_kDownloaded, _downloaded.toList());
+    final store = dvaStore();
+    if (store != null) {
+      await store.dispatch(
+        DvaAction('downloads/setDownloaded', _downloaded.toList()),
+      );
+    }
   }
 
   static Future<int> _dirSize(Directory dir) async {
