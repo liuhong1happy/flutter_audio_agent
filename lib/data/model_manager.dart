@@ -16,6 +16,7 @@ import '../dva/app_models.dart';
 import '../models/tts_model.dart';
 import '../models/tts_settings.dart';
 import 'archive_extractor.dart';
+import 'model_catalog.dart';
 import 'model_downloader.dart';
 import 'model_files_resolver.dart';
 
@@ -103,11 +104,28 @@ class ModelManager extends ChangeNotifier {
   String modelArchivePath(TtsModel model) =>
       p.join(modelsDir.path, model.id, '${model.id}.tar.bz2');
 
-  /// 下载地址(应用镜像前缀)。
+  /// 下载地址候选列表(多镜像自动回退)。
+  ///
+  /// 顺序:手动镜像(设置里填)→ 国内 GitHub 代理 → 直连 GitHub(兜底)。
+  /// 国内网络直连 GitHub 常失败,代理列表保证有可用的源。
+  List<String> downloadCandidates(TtsModel model) {
+    final list = <String>[];
+    final manual = settings.mirrorPrefix.trim();
+    if (manual.isNotEmpty) {
+      list.add('$manual${model.url}');
+    }
+    for (final proxy in kChinaGitHubProxies) {
+      list.add('$proxy${model.url}');
+    }
+    list.add(model.url);
+    return list;
+  }
+
+  /// 兼容旧调用:返回首个候选(手动镜像或直连)。
   String effectiveUrl(TtsModel model) {
-    final prefix = settings.mirrorPrefix;
-    if (prefix.isEmpty) return model.url;
-    return '$prefix${model.url}';
+    final manual = settings.mirrorPrefix.trim();
+    if (manual.isNotEmpty) return '$manual${model.url}';
+    return model.url;
   }
 
   Future<void> load() async {
@@ -131,18 +149,54 @@ class ModelManager extends ChangeNotifier {
     _cancelTokens[model.id] = cancelToken;
 
     try {
-      await downloader.download(
-        url: effectiveUrl(model),
-        savePath: modelArchivePath(model),
-        cancelToken: cancelToken,
-        onProgress: (received, total) {
-          final progress = total > 0 ? received / total : 0.0;
-          _setState(model, ModelDownloadState(
-            status: DownloadStatus.downloading,
-            progress: progress.clamp(0.0, 1.0),
-          ));
-        },
-      );
+      // 多镜像回退:依次尝试,成功即止。
+      final candidates = downloadCandidates(model);
+      var succeeded = false;
+      String? lastError;
+
+      for (var i = 0; i < candidates.length; i++) {
+        if (cancelToken.isCancelled) break;
+        final url = candidates[i];
+        _setState(model, ModelDownloadState(
+          status: DownloadStatus.downloading,
+          progress: 0,
+          error: candidates.length > 1 ? '尝试源 ${i + 1}/${candidates.length}' : null,
+        ));
+        try {
+          await downloader.download(
+            url: url,
+            savePath: modelArchivePath(model),
+            cancelToken: cancelToken,
+            onProgress: (received, total) {
+              final progress = total > 0 ? received / total : 0.0;
+              _setState(model, ModelDownloadState(
+                status: DownloadStatus.downloading,
+                progress: progress.clamp(0.0, 1.0),
+              ));
+            },
+          );
+          // 校验是否真的是 bzip2(tar.bz2 魔数 BZh),避免代理返回错误页面。
+          if (!await _isValidBzip2(modelArchivePath(model))) {
+            throw StateError('响应不是有效的 tar.bz2');
+          }
+          succeeded = true;
+          break;
+        } on DioException catch (e) {
+          lastError = e.message;
+          if (CancelToken.isCancel(e)) break;
+          await _deleteIfExists(modelArchivePath(model));
+          // 继续下一个源。
+        } catch (e) {
+          lastError = '$e';
+          if (cancelToken.isCancelled) break;
+          await _deleteIfExists(modelArchivePath(model));
+          // 继续下一个源。
+        }
+      }
+
+      if (!succeeded) {
+        throw StateError('所有下载源均失败: $lastError');
+      }
 
       // 解压。
       _setState(model, const ModelDownloadState(
@@ -270,5 +324,36 @@ class ModelManager extends ChangeNotifier {
       }
     }
     return total;
+  }
+
+  static Future<void> _deleteIfExists(String path) async {
+    final f = File(path);
+    if (await f.exists()) {
+      try {
+        await f.delete();
+      } on FileSystemException {
+        // 忽略删除失败。
+      }
+    }
+  }
+
+  /// 校验文件是否为 tar.bz2(魔数 `BZh`),防止镜像返回 HTML 错误页。
+  static Future<bool> _isValidBzip2(String path) async {
+    try {
+      final f = File(path);
+      if (!await f.exists()) return false;
+      final raf = await f.open();
+      try {
+        final header = await raf.read(3);
+        return header.length == 3 &&
+            header[0] == 0x42 && // 'B'
+            header[1] == 0x5A && // 'Z'
+            header[2] == 0x68; // 'h'
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
   }
 }

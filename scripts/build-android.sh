@@ -56,13 +56,18 @@ TASK_TIME=$((END_TIMESTAMP-START_TIMESTAMP))
 
 if [ -n "$FEISHU_ACCESS_TOKEN" ]; then
   echo "开始飞书通知..."
-  # 模板要求 duration 与 qrcode.img_key(飞书图库图片 key,可经 FEISHU_QR_IMG_KEY 提供)。
+  # 模板要求 duration 与 qrcode.img_key(必须是本飞书应用/租户图库里的图片 key)。
   CONTENT="{\"project\":\"flutter_tts_demo\",\"platform\":\"Android\",\"env\":\"开发环境\",\"startTime\":\"${START_TIME}\",\"endTime\":\"${END_TIME}\",\"duration\":\"${TASK_TIME}\",\"qrcode\":{\"img_key\":\"${FEISHU_QR_IMG_KEY:-}\"},\"links\":{\"url\":\"${DOWNLOAD_URL}\"}}"
-  curl "$FEISHU_URL" \
+  RESP=$(curl -s "$FEISHU_URL" \
     -H 'Content-Type: application/json;charset=UTF-8' \
-    -d "{\"msg_type\":\"interactive\",\"card\":{\"type\":\"template\",\"data\":{\"template_id\":\"${FEISHU_TEMPLATE_ID}\",\"template_variable\":${CONTENT}}}}"
+    -d "{\"msg_type\":\"interactive\",\"card\":{\"type\":\"template\",\"data\":{\"template_id\":\"${FEISHU_TEMPLATE_ID}\",\"template_variable\":${CONTENT}}}}")
   echo ""
-  echo "飞书通知完成"
+  echo "飞书响应: $RESP"
+  case "$RESP" in
+    *'"code":0'*) echo "飞书通知成功" ;;
+    *'image does not belong'*) echo "飞书拒绝:img_key 不属于本飞书应用/租户,请在飞书开放平台上传二维码图后更新 FEISHU_QR_IMG_KEY" ;;
+    *) echo "飞书通知被拒,请检查 FEISHU_ACCESS_TOKEN / FEISHU_TEMPLATE_ID / FEISHU_QR_IMG_KEY" ;;
+  esac
 else
   echo "未设置 FEISHU_ACCESS_TOKEN,跳过飞书通知。"
 fi

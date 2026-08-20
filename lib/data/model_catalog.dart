@@ -11,6 +11,15 @@ import '../models/tts_model.dart';
 const String kTtsModelsReleaseBase =
     'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models';
 
+/// 国内可用的 GitHub 加速代理(按可用性排序;实测于 2026-08)。
+/// 下载时按顺序回退,直连 GitHub 作为最后兜底。
+const List<String> kChinaGitHubProxies = [
+  'https://ghfast.top/',
+  'https://ghproxy.net/',
+  'https://gh-proxy.com/',
+  'https://ghps.cc/',
+];
+
 class ModelCatalog {
   const ModelCatalog();
 

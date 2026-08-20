@@ -23,7 +23,14 @@ abstract class ModelDownloader {
 
 /// 基于 dio 的流式 HTTP 下载实现。
 class HttpModelDownloader implements ModelDownloader {
-  HttpModelDownloader({Dio? dio}) : _dio = dio ?? Dio();
+  HttpModelDownloader({Dio? dio})
+      : _dio = dio ??
+            Dio(BaseOptions(
+              // 连接超时设短,便于多镜像快速回退;接收超时按数据块空闲计。
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(minutes: 10),
+              sendTimeout: const Duration(minutes: 10),
+            ));
 
   final Dio _dio;
 

@@ -125,27 +125,27 @@ class TtsSettingsPage extends StatelessWidget {
             onSelectionChanged: (s) => settings.setNumThreads(s.first),
           ),
           const SizedBox(height: 16),
-          _SectionLabel('下载镜像'),
+          _SectionLabel('下载源'),
           DropdownButtonFormField<String>(
             key: const ValueKey('mirrorSelector'),
-            initialValue: settings.mirrorPrefix.isEmpty ? 'direct' : 'mirror',
+            initialValue: settings.mirrorPrefix.isEmpty ? 'auto' : 'custom',
             decoration: const InputDecoration(
-              labelText: '下载源(国内网络慢时可切换镜像)',
+              labelText: '下载源(国内网络自动回退代理)',
               border: OutlineInputBorder(),
             ),
             items: const [
               DropdownMenuItem(
-                value: 'direct',
-                child: Text('GitHub 直连(默认)'),
+                value: 'auto',
+                child: Text('自动(国内代理+直连回退,推荐)'),
               ),
               DropdownMenuItem(
-                value: 'mirror',
-                child: Text('镜像(ghproxy 前缀)'),
+                value: 'custom',
+                child: Text('自定义镜像前缀(ghfast.top)'),
               ),
             ],
             onChanged: (v) {
               settings.setMirrorPrefix(
-                v == 'mirror' ? 'https://ghproxy.net/' : '',
+                v == 'custom' ? 'https://ghfast.top/' : '',
               );
             },
           ),
