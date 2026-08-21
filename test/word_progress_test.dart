@@ -121,4 +121,45 @@ void main() {
     await deps.streamingService.disposeAll();
     tempDir.deleteSync(recursive: true);
   });
+
+  test('分块策略:首句1+4+10,后续句整句,长句按10切', () async {
+    SharedPreferences.setMockInitialValues({});
+    final tempDir = Directory.systemTemp.createTempSync('chunk_');
+
+    final deps = AppDependencies(
+      engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 20)),
+      downloader: FakeModelDownloader(),
+      chunker: TextChunker(enableJieba: false),
+      extractor: const ArchiveExtractor(useCompute: false),
+      player: FakeAudioPlaybackQueue(
+        delayPerSegment: const Duration(milliseconds: 50),
+      ),
+      modelsDirProvider: () async => Directory('${tempDir.path}/models'),
+      audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    );
+    await deps.init();
+    final model = ModelCatalog.all.first;
+    await deps.modelManager.downloadModel(model);
+    await deps.settings.selectModel(model.id);
+
+    // 场景1:首句(3词)→ 渐进 [1, 剩余2];第二句(1词)→ 整句 1 块。共 3 块。
+    await deps.streamingService.speak('你好 world 你好。今天天气不错。');
+    final segs1 = deps.streamingService.segments;
+    expect(segs1, hasLength(3), reason: '首句2块 + 第二句整句1块');
+    expect(
+      deps.streamingService.segmentWords.first
+          .where((w) => !w.isSeparator)
+          .length,
+      1,
+      reason: '首句首块应只有 1 个词(最快出声)',
+    );
+
+    // 场景2:首句 11 个英文词 → 1 + 4 + 6 = 3 块。
+    await deps.streamingService.speak('a b c d e f g h i j k。');
+    final segs2 = deps.streamingService.segments;
+    expect(segs2, hasLength(3), reason: '首句 11 词按 1+4+剩余6 切成 3 块');
+
+    await deps.streamingService.disposeAll();
+    tempDir.deleteSync(recursive: true);
+  });
 }

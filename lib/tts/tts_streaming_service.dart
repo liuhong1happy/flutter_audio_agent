@@ -103,17 +103,16 @@ class TtsStreamingService extends ChangeNotifier {
     return count + segWordIndex;
   }
 
-  /// 渐进分块:先按句末标点切句(避免长句/跨句切块),每句内再
-  /// 按 1 + 2 + 4 + 4 + … + 剩余 渐进分组。
-  ///
-  /// 首块只含 1 个词 → 合成极快,首个音频尽早播放;后续块逐级放宽。
-  /// 每块文本 = 从块首词到下一块首词之间的子串(保留标点/停顿)。
+  /// 分块策略:
+  /// - **首句** 按 `1 + 4 + 10 + … + 剩余` 渐进分组:首词尽快出声,
+  ///   又不至于像 1+2+4 那样割裂。
+  /// - **后续句子** 整句一块(顺滑、自然);超长句(>10 词)按 10 词切分。
+  /// - 先按句末标点切句,避免长句/跨句切块。
   List<_ProgressiveChunk> _buildProgressiveChunks(
     List<WordSpan> allWords,
     String text,
   ) {
     const breakChars = '。！？；;.!?…\n';
-    const pattern = [1, 2, 4];
 
     // 1. 按标点切句。
     final sentences = <(int, int)>[];
@@ -127,9 +126,10 @@ class TtsStreamingService extends ChangeNotifier {
     if (sentStart < text.length) sentences.add((sentStart, text.length));
     if (sentences.isEmpty) sentences.add((0, text.length));
 
-    // 2. 每句内渐进分组。
+    // 2. 分块。
     final chunks = <_ProgressiveChunk>[];
-    for (final (senStart, senEnd) in sentences) {
+    for (var si = 0; si < sentences.length; si++) {
+      final (senStart, senEnd) = sentences[si];
       final senWords = allWords
           .where((w) => w.start >= senStart && w.end <= senEnd)
           .toList();
@@ -145,30 +145,57 @@ class TtsStreamingService extends ChangeNotifier {
         ));
         continue;
       }
-      var idx = 0;
-      var pi = 0;
-      while (idx < real.length) {
-        final size = pattern[pi < pattern.length ? pi : pattern.length - 1];
-        final group = real.skip(idx).take(size).toList();
-        final first = group.first;
-        final end = idx + size >= real.length
-            ? senEnd
-            : real[idx + size].start;
+
+      if (si == 0) {
+        // 首句:1 + 4 + 10 + … + 剩余。
+        _addPatternChunks(chunks, text, real, senWords, senEnd, const [1, 4, 10]);
+      } else if (real.length <= 10) {
+        // 后续句:整句一块。
         chunks.add(_ProgressiveChunk(
           segment: TtsSegment(
-            text: text.substring(first.start, end),
-            start: first.start,
-            end: end,
+            text: text.substring(real.first.start, senEnd),
+            start: real.first.start,
+            end: senEnd,
           ),
-          words: senWords
-              .where((w) => w.start >= first.start && w.end <= end)
-              .toList(),
+          words: senWords,
         ));
-        idx += size;
-        pi++;
+      } else {
+        // 长句(>10 词):按 10 词切分,末块为剩余。
+        _addPatternChunks(chunks, text, real, senWords, senEnd, const [10]);
       }
     }
     return chunks;
+  }
+
+  /// 在句内按 [pattern] 尺寸渐进分组(循环使用,末块为剩余)。
+  void _addPatternChunks(
+    List<_ProgressiveChunk> out,
+    String text,
+    List<WordSpan> real,
+    List<WordSpan> senWords,
+    int senEnd,
+    List<int> pattern,
+  ) {
+    var idx = 0;
+    var pi = 0;
+    while (idx < real.length) {
+      final size = pattern[pi < pattern.length ? pi : pattern.length - 1];
+      final group = real.skip(idx).take(size).toList();
+      final first = group.first;
+      final end = idx + size >= real.length ? senEnd : real[idx + size].start;
+      out.add(_ProgressiveChunk(
+        segment: TtsSegment(
+          text: text.substring(first.start, end),
+          start: first.start,
+          end: end,
+        ),
+        words: senWords
+            .where((w) => w.start >= first.start && w.end <= end)
+            .toList(),
+      ));
+      idx += size;
+      pi++;
+    }
   }
 
   void _stopWordTracking() {
