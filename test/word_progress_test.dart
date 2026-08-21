@@ -230,6 +230,16 @@ void main() {
         deps.streamingService.normalization!.text,
         reason: '段应完整覆盖原文');
 
+    // 顿号分割:含顿号的长句被切成短语块,块尾带顿号。
+    await deps.streamingService.speak('内容涵盖了青春励志、情感故事、社会热点等多个方面,注重深度。');
+    final sDun = deps.streamingService.segments;
+    expect(sDun.any((s) => s.text.endsWith('、')), isTrue,
+        reason: '顿号应是分块边界(块尾带顿号)');
+    expect(sDun.map((s) => s.text).join(),
+        deps.streamingService.normalization!.text);
+    final longestDun = sDun.fold<int>(0, (m, s) => s.text.length > m ? s.text.length : m);
+    expect(longestDun, lessThan(25), reason: '顿号切分后不应出现超长块');
+
     // 年月日整块:日期不被首句渐进拆散。
     await deps.streamingService.speak('2026 年 08 月 21 日,实验室完成版本迭代。');
     final sDate = deps.streamingService.segments;

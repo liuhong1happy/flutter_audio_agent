@@ -109,29 +109,43 @@ class TtsStreamingService extends ChangeNotifier {
   /// 分块策略:
   /// - **首句** 按 `1 + 4 + 10 + … + 剩余` 渐进分组:首词尽快出声,
   ///   又不至于像 1+2+4 那样割裂。
-  /// - **后续句子** 整句一块(顺滑、自然);超长句(>10 词)按 10 词切分。
-  /// - 先按句末标点与**逗号**(中英文)切句,使每一块落在自然短语边界上
-  ///   (合成/高亮更贴合语感),避免跨逗号硬切。
+  /// - **后续句子** 整句一块(顺滑、自然);超长句(>20 词)按 10 词兜底切分。
+  /// - 先按句末标点、**逗号**(中英文)与**顿号 `、`** 切句,使每一块落在
+  ///   自然短语边界上,避免含顿号的长句合成过久、出现"卡时间"。
+  /// - 过短的后续句(≤2 实词,如 `风,`、顿号项)并入下一句,避免碎片化。
   /// - 纯标点/空白的"句子"(如段落换行)并入前一块,避免产生空块。
-  /// - 后续句 ≤16 词整句一块;更长的才按 10 词兜底切分,避免无谓的
-  ///   短语硬切(顿号 `、` 不算边界,避免过度碎片化)。
   List<_ProgressiveChunk> _buildProgressiveChunks(
     List<WordSpan> allWords,
     String text,
   ) {
-    const breakChars = '。！？；;.!?…\n，,';
+    const breakChars = '。！？；;.!?…\n，,、';
 
-    // 1. 按标点切句(含逗号)。
-    final sentences = <(int, int)>[];
+    // 1. 按标点切句(含逗号/顿号)。
+    final rawSentences = <(int, int)>[];
     var sentStart = 0;
     for (var i = 0; i < text.length; i++) {
       if (breakChars.contains(text[i])) {
-        sentences.add((sentStart, i + 1));
+        rawSentences.add((sentStart, i + 1));
         sentStart = i + 1;
       }
     }
-    if (sentStart < text.length) sentences.add((sentStart, text.length));
-    if (sentences.isEmpty) sentences.add((0, text.length));
+    if (sentStart < text.length) rawSentences.add((sentStart, text.length));
+    if (rawSentences.isEmpty) rawSentences.add((0, text.length));
+
+    // 1b. 过短的后续句(<5 字符,如 `风,` `近日,` 及独立顿号项)并入下一句,
+    //     避免碎片化;首句保留,保证最快出声。
+    final sentences = <(int, int)>[];
+    final dropped = List<bool>.filled(rawSentences.length, false);
+    for (var i = 1; i < rawSentences.length; i++) {
+      final (s, e) = rawSentences[i];
+      if (e - s < 5 && i + 1 < rawSentences.length) {
+        rawSentences[i + 1] = (s, rawSentences[i + 1].$2); // 并入下一句。
+        dropped[i] = true;
+      }
+    }
+    for (var i = 0; i < rawSentences.length; i++) {
+      if (!dropped[i]) sentences.add(rawSentences[i]);
+    }
 
     // 2. 分块。
     final chunks = <_ProgressiveChunk>[];
