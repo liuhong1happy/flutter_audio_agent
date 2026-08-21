@@ -41,6 +41,14 @@ class AppDependencies {
         _audioCacheDirProvider =
             audioCacheDirProvider ?? AppPaths.audioCacheDir;
 
+  static AppDependencies? _instance;
+
+  /// 全局单例(生产环境经 [AppDependencies.instance.init] 初始化一次)。
+  static AppDependencies get instance => _instance ??= AppDependencies();
+
+  /// 测试用:重置单例(避免跨用例状态污染)。
+  static void resetInstance() => _instance = null;
+
   final TtsEngine engine;
   final TtsSettings settings;
 
@@ -54,9 +62,13 @@ class AppDependencies {
 
   late final ModelManager modelManager;
   late final TtsStreamingService streamingService;
+  bool _initialized = false;
 
-  /// 异步初始化(加载持久化设置、计算目录、装配依赖)。
+  /// 异步初始化(加载持久化设置、计算目录、装配依赖)。幂等。
   Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+
     await settings.load();
 
     final modelsDir = await _modelsDirProvider();

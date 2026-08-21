@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter_dva/flutter_dva.dart';
 
+import '../app_dependencies.dart';
 import 'app_models.dart';
 
 /// 全局 Dva 实例。
@@ -34,8 +35,10 @@ Future<WidgetCreatorFunction> initDva({
   required WidgetCreatorFunction appCreator,
 }) {
   return dva.start(appCreator, () async {
-    // 1. 数据持久化(settings / downloads)
+    // 1. 数据持久化(settings / downloads / history)
     final persistor = ReduxPersistor(store: dva.store!, heartBeat: 450);
     await persistor.persist();
+    // 2. 持久化恢复后,一起初始化应用依赖(单例)。
+    await AppDependencies.instance.init();
   }, waitCallabck: true);
 }

@@ -7,13 +7,11 @@ import 'dva/app_dva.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 先启动 flutter_dva(含 ReduxPersistor 持久化),再装配依赖。
-  // deps 用 late 声明,让 dva.start 的 appCreator 能延迟引用它。
-  late AppDependencies deps;
-  final app = await initDva(appCreator: () => TtsDemoApp(dependencies: deps));
-
-  deps = AppDependencies();
-  await deps.init();
+  // 先启动 flutter_dva(含 ReduxPersistor),回调里在持久化恢复后
+  // 统一初始化 AppDependencies 单例;appCreator 延迟引用同一单例。
+  final app = await initDva(
+    appCreator: () => TtsDemoApp(dependencies: AppDependencies.instance),
+  );
 
   return runApp(app());
 }
