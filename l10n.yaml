@@ -1,0 +1,7 @@
+# Flutter gen-l10n 配置。
+# 源语言中文(模板),提供英文翻译;默认跟随系统语言,回退中文。
+arb-dir: lib/l10n
+template-arb-file: app_zh.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

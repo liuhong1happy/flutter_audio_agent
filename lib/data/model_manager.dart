@@ -84,6 +84,9 @@ class ModelManager extends ChangeNotifier {
   final Map<String, ModelDownloadState> _states = {};
   final Map<String, CancelToken> _cancelTokens = {};
 
+  /// 是否已从持久化恢复(仅首次 [load] 生效,避免运行时状态被重复 load 覆盖)。
+  bool _loaded = false;
+
   Set<String> _downloaded = {};
   Set<String> get downloaded => Set.unmodifiable(_downloaded);
 
@@ -121,14 +124,9 @@ class ModelManager extends ChangeNotifier {
     return list;
   }
 
-  /// 兼容旧调用:返回首个候选(手动镜像或直连)。
-  String effectiveUrl(TtsModel model) {
-    final manual = settings.mirrorPrefix.trim();
-    if (manual.isNotEmpty) return '$manual${model.url}';
-    return model.url;
-  }
-
   Future<void> load() async {
+    if (_loaded) return;
+    _loaded = true;
     final store = dvaStore();
     if (store != null) {
       final d = store.getStateByKey<DownloadsState>('downloads');
@@ -184,11 +182,12 @@ class ModelManager extends ChangeNotifier {
         } on DioException catch (e) {
           lastError = e.message;
           if (CancelToken.isCancel(e)) break;
-          await _deleteIfExists(modelArchivePath(model));
+          // 保留部分文件,支持断点续传:下一个源从 Range 偏移继续。
           // 继续下一个源。
         } catch (e) {
           lastError = '$e';
           if (cancelToken.isCancelled) break;
+          // 文件完整但校验失败(魔数/解压/大小),删除以便重新完整下载。
           await _deleteIfExists(modelArchivePath(model));
           // 继续下一个源。
         }
@@ -208,10 +207,14 @@ class ModelManager extends ChangeNotifier {
         outputDir: modelUnpackedDir(model),
       );
 
-      // 校验关键文件是否齐全。
+      // 校验关键文件是否齐全 + 主模型非平凡大小(防止损坏/截断的空文件)。
       final resolved = resolver.resolve(model, modelUnpackedDir(model));
       if (resolved == null || !resolved.isComplete) {
         throw StateError('模型文件不完整: ${model.id}');
+      }
+      if (resolved.modelPath != null &&
+          await _fileSizeBelow(resolved.modelPath!, _minOnnxBytes)) {
+        throw StateError('模型主文件异常(过小,疑似损坏),请重新下载: ${model.id}');
       }
 
       _downloaded.add(model.id);
@@ -309,6 +312,20 @@ class ModelManager extends ChangeNotifier {
       await store.dispatch(
         DvaAction('downloads/setDownloaded', _downloaded.toList()),
       );
+    }
+  }
+
+  /// 主模型文件的最小合理大小:真实 onnx 数十 MB 以上,
+  /// 远小于此视为下载/解压损坏。
+  static const int _minOnnxBytes = 1024;
+
+  static Future<bool> _fileSizeBelow(String path, int threshold) async {
+    try {
+      final f = File(path);
+      if (!await f.exists()) return true;
+      return await f.length() < threshold;
+    } catch (_) {
+      return true;
     }
   }
 

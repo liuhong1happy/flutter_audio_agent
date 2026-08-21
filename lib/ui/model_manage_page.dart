@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
+import '../l10n/app_localizations.dart';
 import '../models/tts_model.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text.dart';
@@ -21,19 +22,20 @@ class ModelManagePage extends StatefulWidget {
 
 class _ModelManagePageState extends State<ModelManagePage> {
   Future<void> _clearAllCaches(ModelManager manager) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清理全部缓存'),
-        content: const Text('将删除所有已下载模型与音频缓存,并重置已下载标记。\n此操作不可恢复。'),
+        title: Text(l10n.clearAllTitle),
+        content: Text(l10n.clearAllConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确认清理'),
+            child: Text(l10n.confirmClear),
           ),
         ],
       ),
@@ -46,10 +48,11 @@ class _ModelManagePageState extends State<ModelManagePage> {
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<ModelManager>();
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('模型管理'),
+        title: Text(l10n.modelManageTitle),
         actions: [
           FutureBuilder<int>(
             future: manager.totalBytesOnDisk(),
@@ -59,7 +62,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
                 child: Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: Text(
-                    '占用 ${mb.toStringAsFixed(1)}MB',
+                    l10n.diskUsage(mb.toStringAsFixed(1)),
                     style: AppText.caption.copyWith(color: AppColors.inkTertiary),
                   ),
                 ),
@@ -91,7 +94,7 @@ class _ModelManagePageState extends State<ModelManagePage> {
                   key: const ValueKey('clearCacheButton'),
                   onPressed: () => _clearAllCaches(manager),
                   icon: const Icon(Icons.cleaning_services_outlined),
-                  label: const Text('清理全部缓存(删除所有模型)'),
+                  label: Text(l10n.clearAll),
                 ),
               ),
             ),
@@ -116,6 +119,7 @@ class _ModelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final manager = context.read<ModelManager>();
+    final l10n = AppLocalizations.of(context);
 
     final isDownloading = state.isDownloading;
     final progress = state.progress;
@@ -123,7 +127,7 @@ class _ModelTile extends StatelessWidget {
     Widget trailing;
     if (isDownloaded) {
       trailing = IconButton(
-        tooltip: '删除模型',
+        tooltip: l10n.deleteModel,
         icon: const Icon(Icons.delete_outline, color: AppColors.danger),
         onPressed: () => manager.removeModel(model),
       );
@@ -137,7 +141,7 @@ class _ModelTile extends StatelessWidget {
             child: CircularProgressIndicator(value: progress),
           ),
           IconButton(
-            tooltip: '取消下载',
+            tooltip: l10n.cancelDownload,
             icon: const Icon(Icons.close),
             onPressed: () => manager.cancelDownload(model),
           ),
@@ -146,7 +150,7 @@ class _ModelTile extends StatelessWidget {
     } else {
       trailing = FilledButton.tonal(
         onPressed: () => manager.downloadModel(model),
-        child: const Text('下载'),
+        child: Text(l10n.download),
       );
     }
 

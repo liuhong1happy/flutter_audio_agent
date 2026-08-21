@@ -48,7 +48,7 @@ void main() {
     final joined = deps.streamingService.segments.map((s) => s.text).join();
     expect(joined, deps.streamingService.normalization!.text,
         reason: '渐进分块应完整覆盖全文');
-    final firstRealWords = deps.streamingService.segmentWords.first
+    final firstRealWords = deps.streamingService.utterances.last.segmentWords.first
         .where((w) => !w.isSeparator)
         .length;
     expect(firstRealWords, 1, reason: '首块应只有 1 个词,保证最快出声');
@@ -147,7 +147,7 @@ void main() {
     final segs1 = deps.streamingService.segments;
     expect(segs1, hasLength(3), reason: '首句2块 + 第二句整句1块');
     expect(
-      deps.streamingService.segmentWords.first
+      deps.streamingService.utterances.last.segmentWords.first
           .where((w) => !w.isSeparator)
           .length,
       1,
@@ -158,6 +158,58 @@ void main() {
     await deps.streamingService.speak('a b c d e f g h i j k。');
     final segs2 = deps.streamingService.segments;
     expect(segs2, hasLength(3), reason: '首句 11 词按 1+4+剩余6 切成 3 块');
+
+    await deps.streamingService.disposeAll();
+    tempDir.deleteSync(recursive: true);
+  });
+
+  test('历史恢复的气泡(segments 为空)重读时重新分块并播放', () async {
+    SharedPreferences.setMockInitialValues({});
+    final tempDir = Directory.systemTemp.createTempSync('history_replay_');
+
+    final playback = FakeAudioPlaybackQueue(
+      delayPerSegment: const Duration(milliseconds: 30),
+    );
+    final engine = FakeTtsEngine(segmentDuration: const Duration(milliseconds: 5));
+    final deps = AppDependencies(
+      engine: engine,
+      downloader: FakeModelDownloader(),
+      chunker: TextChunker(enableJieba: false),
+      extractor: const ArchiveExtractor(useCompute: false),
+      player: playback,
+      modelsDirProvider: () async => Directory('${tempDir.path}/models'),
+      audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    );
+    await deps.init();
+    final model = ModelCatalog.all.first;
+    await deps.modelManager.downloadModel(model);
+    await deps.settings.selectModel(model.id);
+
+    await deps.streamingService.speak('你好 world 你好。今天天气不错。');
+    final u = deps.streamingService.utterances.last;
+    expect(u.segments, isNotEmpty, reason: '首次朗读应产生分块');
+    final generatedBefore = engine.generatedTexts.length;
+
+    // 模拟历史恢复:segments / words 被清空(loadHistory 只存原文+统计)。
+    u.segments = [];
+    u.segmentWords = [];
+    u.allWords = [];
+    u.normalization = null;
+    expect(u.segments, isEmpty, reason: '前提:历史恢复后分块为空');
+
+    await deps.streamingService.replayUtterance(0);
+    expect(u.segments, isNotEmpty, reason: '重读时应重新分块');
+
+    // 等待播放推进(合成是异步拉取)。
+    for (var i = 0;
+        i < 30 && playback.startedSegmentIndexes.isEmpty;
+        i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(playback.startedSegmentIndexes, isNotEmpty,
+        reason: '重读应有段开始播放');
+    expect(engine.generatedTexts.length, greaterThan(generatedBefore),
+        reason: '重读应重新走合成');
 
     await deps.streamingService.disposeAll();
     tempDir.deleteSync(recursive: true);

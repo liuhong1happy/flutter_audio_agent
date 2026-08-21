@@ -67,6 +67,13 @@ void main() {
     expect(playback.startedSegmentIndexes, isNotEmpty,
         reason: '应至少开始播放一段(朗读进度高亮推进)');
 
+    // 发送成功后输入框应清空。
+    final input = tester.widget<TextField>(
+      find.byKey(const ValueKey('ttsInput')),
+    );
+    expect(input.controller?.text, isEmpty,
+        reason: '发送后输入框应清空');
+
     // 归一化文本应出现在朗读视图中。
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.textContaining('价格十二点五元'), findsOneWidget);

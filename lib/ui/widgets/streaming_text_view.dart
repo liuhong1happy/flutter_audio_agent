@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../tts/text_chunker.dart';
 import '../../tts/text_normalizer.dart';
 
@@ -94,8 +95,8 @@ class _StreamingTextViewState extends State<StreamingTextView> {
     final onHighlight = scheme.onPrimaryContainer;
 
     if (widget.segments.isEmpty) {
-      return const Center(
-        child: Text('输入文本后点击"合成并播放",这里会逐句高亮显示朗读进度。'),
+      return Center(
+        child: Text(AppLocalizations.of(context).streamingEmptyHint),
       );
     }
 

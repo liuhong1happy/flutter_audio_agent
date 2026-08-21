@@ -4,6 +4,8 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.util.Properties
+
 android {
     // namespace 必须是合法 Java 包名(段不能以数字开头);
     // applicationId(安装包标识)则使用用户指定的 top.17ued.tts。
@@ -14,6 +16,23 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        // 存在 android/key.properties(含正式 keystore 信息)时启用 release 签名;
+        // 否则不创建,release 构建回退 debug 签名,保证本地/CI 可构建。
+        val keystorePropsFile = rootProject.file("key.properties")
+        if (keystorePropsFile.exists()) {
+            val props = Properties().apply {
+                load(keystorePropsFile.inputStream())
+            }
+            create("release") {
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
     }
 
     defaultConfig {
@@ -38,9 +57,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 配置了 android/key.properties 时用正式签名,否则回退 debug 签名。
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 }

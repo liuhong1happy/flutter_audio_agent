@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
+import '../l10n/app_localizations.dart';
 import '../models/tts_settings.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -24,6 +25,7 @@ class TtsSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<TtsSettings>();
     final manager = context.watch<ModelManager>();
+    final l10n = AppLocalizations.of(context);
 
     // 已下载模型列表。
     final downloadedModels = ModelCatalog.all
@@ -32,20 +34,20 @@ class TtsSettingsPage extends StatelessWidget {
     final selectedModel = ModelCatalog.byId(settings.selectedModelId);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('TTS 设置')),
+      appBar: AppBar(title: Text(l10n.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _SectionLabel('模型'),
+          _SectionLabel(l10n.sectionModel),
           if (downloadedModels.isEmpty)
             Card(
               child: ListTile(
                 leading: const Icon(Icons.info_outline),
-                title: const Text('尚未下载任何模型'),
-                subtitle: const Text('先到模型管理页下载一个模型,再回来选择。'),
+                title: Text(l10n.noModelDownloaded),
+                subtitle: Text(l10n.noModelHint),
                 trailing: TextButton(
                   onPressed: () => onNavigateToModel?.call(),
-                  child: const Text('去下载'),
+                  child: Text(l10n.goModel),
                 ),
               ),
             )
@@ -54,16 +56,16 @@ class TtsSettingsPage extends StatelessWidget {
               key: const ValueKey('modelSelector'),
               initialValue: selectedModel?.id,
               isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: '选择模型',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l10n.selectModelLabel,
+                border: const OutlineInputBorder(),
               ),
               items: [
                 for (final m in downloadedModels)
                   DropdownMenuItem(
                     value: m.id,
                     child: Text(
-                      '${m.displayName} (${m.speakers} 音色)',
+                      l10n.modelSpeakerCount(m.displayName, m.speakers),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -73,12 +75,12 @@ class TtsSettingsPage extends StatelessWidget {
           const SizedBox(height: 8),
           if (selectedModel == null)
             Text(
-              '未选择模型,合成前需要先选择。',
+              l10n.modelNotSelected,
               style: AppText.caption.copyWith(color: AppColors.danger),
             ),
           if (selectedModel != null && selectedModel.speakers > 1) ...[
             const SizedBox(height: 16),
-            _SectionLabel('说话人 (sid ${settings.sid})'),
+            _SectionLabel(l10n.speakerLabel(settings.sid)),
             Slider(
               key: const ValueKey('sidSlider'),
               value: settings.sid.toDouble(),
@@ -92,7 +94,7 @@ class TtsSettingsPage extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 16),
-          _SectionLabel('语速 ${settings.speed.toStringAsFixed(2)}x'),
+          _SectionLabel(l10n.speedLabel(settings.speed.toStringAsFixed(2))),
           Slider(
             key: const ValueKey('speedSlider'),
             value: settings.speed,
@@ -103,7 +105,9 @@ class TtsSettingsPage extends StatelessWidget {
             onChanged: (v) => settings.setSpeed(v),
           ),
           const SizedBox(height: 16),
-          _SectionLabel('句间静音 ${(settings.silenceScale * 100).round()}%'),
+          _SectionLabel(
+            l10n.silenceLabel((settings.silenceScale * 100).round()),
+          ),
           Slider(
             key: const ValueKey('silenceSlider'),
             value: settings.silenceScale,
@@ -113,7 +117,7 @@ class TtsSettingsPage extends StatelessWidget {
             onChanged: (v) => settings.setSilenceScale(v),
           ),
           const SizedBox(height: 16),
-          _SectionLabel('推理线程 ${settings.numThreads}'),
+          _SectionLabel(l10n.threadLabel(settings.numThreads)),
           SegmentedButton<int>(
             key: const ValueKey('threadSelector'),
             segments: const [
@@ -125,34 +129,12 @@ class TtsSettingsPage extends StatelessWidget {
             onSelectionChanged: (s) => settings.setNumThreads(s.first),
           ),
           const SizedBox(height: 16),
-          _SectionLabel('下载源'),
-          DropdownButtonFormField<String>(
-            key: const ValueKey('mirrorSelector'),
-            initialValue: settings.mirrorPrefix.isEmpty ? 'auto' : 'custom',
-            decoration: const InputDecoration(
-              labelText: '下载源(国内网络自动回退代理)',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 'auto',
-                child: Text('自动(国内代理+直连回退,推荐)'),
-              ),
-              DropdownMenuItem(
-                value: 'custom',
-                child: Text('自定义镜像前缀(ghfast.top)'),
-              ),
-            ],
-            onChanged: (v) {
-              settings.setMirrorPrefix(
-                v == 'custom' ? 'https://ghfast.top/' : '',
-              );
-            },
-          ),
+          _SectionLabel(l10n.downloadSource),
+          _MirrorSourcePicker(settings: settings),
           const SizedBox(height: 16),
           SwitchListTile(
             key: const ValueKey('autoScrollSwitch'),
-            title: const Text('自动滚动跟随朗读'),
+            title: Text(l10n.autoScroll),
             value: settings.autoScroll,
             onChanged: (v) => settings.setAutoScroll(v),
           ),
@@ -176,6 +158,80 @@ class _SectionLabel extends StatelessWidget {
         text,
         style: AppText.headline.copyWith(color: AppColors.inkPrimary),
       ),
+    );
+  }
+}
+
+/// 下载源选择:自动(代理+直连回退)或自定义镜像前缀(可输入任意前缀)。
+class _MirrorSourcePicker extends StatefulWidget {
+  const _MirrorSourcePicker({required this.settings});
+
+  final TtsSettings settings;
+
+  @override
+  State<_MirrorSourcePicker> createState() => _MirrorSourcePickerState();
+}
+
+class _MirrorSourcePickerState extends State<_MirrorSourcePicker> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.settings.mirrorPrefix);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _isCustom => widget.settings.mirrorPrefix.isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          key: const ValueKey('mirrorSelector'),
+          initialValue: _isCustom ? 'custom' : 'auto',
+          decoration: InputDecoration(
+            labelText: l10n.mirrorSourceLabel,
+            border: const OutlineInputBorder(),
+          ),
+          items: [
+            DropdownMenuItem(value: 'auto', child: Text(l10n.mirrorAuto)),
+            DropdownMenuItem(value: 'custom', child: Text(l10n.mirrorCustom)),
+          ],
+          onChanged: (v) {
+            if (v == 'custom') {
+              widget.settings.setMirrorPrefix(
+                _controller.text.trim().isNotEmpty
+                    ? _controller.text.trim()
+                    : 'https://ghfast.top/',
+              );
+            } else {
+              widget.settings.setMirrorPrefix('');
+            }
+          },
+        ),
+        if (_isCustom) ...[
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            key: const ValueKey('mirrorPrefixInput'),
+            controller: _controller,
+            decoration: InputDecoration(
+              labelText: l10n.mirrorPrefixLabel,
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (v) => widget.settings.setMirrorPrefix(v.trim()),
+          ),
+        ],
+      ],
     );
   }
 }

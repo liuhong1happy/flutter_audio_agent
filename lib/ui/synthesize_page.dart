@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
+import '../l10n/app_localizations.dart';
 import '../models/tts_settings.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -30,6 +31,16 @@ class _SynthesizePageState extends State<SynthesizePage> {
   final TextEditingController _textController = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // 进入合成页时预加载所选模型(已加载则忽略);
+    // 加载期间 modelLoading 为 true,发送按钮被禁用。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<TtsStreamingService>().prepareModel();
+    });
+  }
+
+  @override
   void dispose() {
     _textController.dispose();
     super.dispose();
@@ -38,7 +49,7 @@ class _SynthesizePageState extends State<SynthesizePage> {
   Future<void> _onSpeakPressed(TtsStreamingService service) async {
     final text = _textController.text;
     if (text.trim().isEmpty) {
-      _showMessage('请输入文本');
+      _showMessage(AppLocalizations.of(context).emptyTextError);
       return;
     }
     await service.speak(text);
@@ -58,12 +69,13 @@ class _SynthesizePageState extends State<SynthesizePage> {
 
   void _showError(String? error) {
     if (!mounted) return;
-    final msg = error ?? '发生错误';
+    final l10n = AppLocalizations.of(context);
+    final msg = error ?? l10n.genericError;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
         action: SnackBarAction(
-          label: '去设置',
+          label: l10n.goSettings,
           onPressed: () => widget.onNavigateToSettings?.call(),
         ),
       ),
@@ -75,6 +87,7 @@ class _SynthesizePageState extends State<SynthesizePage> {
     final service = context.watch<TtsStreamingService>();
     final settings = context.watch<TtsSettings>();
     final modelManager = context.watch<ModelManager>();
+    final l10n = AppLocalizations.of(context);
 
     final selectedModel = ModelCatalog.byId(settings.selectedModelId);
     final modelReady =
@@ -82,7 +95,7 @@ class _SynthesizePageState extends State<SynthesizePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('合成'),
+        title: Text(l10n.synthesizeTab),
         actions: [
           _StatusCapsule(
             ready: modelReady,
@@ -119,6 +132,7 @@ class _SynthesizePageState extends State<SynthesizePage> {
               onChange: () => setState(() {}),
               isEmpty: _textController.text.isEmpty,
               active: _isActivePhase(service.phase),
+              loading: service.modelLoading,
               onSend: () => _onSpeakPressed(service),
               onStop: () => service.stop(),
             ),
@@ -146,10 +160,11 @@ class _StatusCapsule extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final color = ready ? AppColors.success : AppColors.warn;
     final text = ready
-        ? (modelName ?? '已选模型')
-        : (modelName == null ? '未选择模型' : '所选模型未下载');
+        ? (modelName ?? l10n.statusReady)
+        : (modelName == null ? l10n.statusNoModel : l10n.statusNotDownloaded);
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: Chip(
@@ -186,16 +201,17 @@ class _PlaybackControlBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final current = service.currentSegment + 1;
+    final total = service.segments.length;
     final phaseText = switch (service.phase) {
-      StreamingPhase.idle => '就绪',
-      StreamingPhase.preparing => '准备中…',
-      StreamingPhase.synthesizing => '合成中…',
-      StreamingPhase.playing =>
-        '播放中 ${service.currentSegment + 1}/${service.segments.length}',
-      StreamingPhase.paused =>
-        '已暂停 ${service.currentSegment + 1}/${service.segments.length}',
-      StreamingPhase.finished => '播放完成',
-      StreamingPhase.error => '出错',
+      StreamingPhase.idle => l10n.phaseIdle,
+      StreamingPhase.preparing => l10n.phasePreparing,
+      StreamingPhase.synthesizing => l10n.phaseSynthesizing,
+      StreamingPhase.playing => l10n.phasePlaying(current, total),
+      StreamingPhase.paused => l10n.phasePaused(current, total),
+      StreamingPhase.finished => l10n.phaseFinished,
+      StreamingPhase.error => l10n.phaseError,
     };
 
     return Material(
@@ -209,7 +225,7 @@ class _PlaybackControlBar extends StatelessWidget {
           children: [
             IconButton(
               key: const ValueKey('playPauseButton'),
-              tooltip: _isPaused ? '继续' : '暂停',
+              tooltip: _isPaused ? l10n.resume : l10n.pause,
               onPressed: _isActive ? onTogglePlayPause : null,
               icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
               visualDensity: VisualDensity.compact,
@@ -238,7 +254,7 @@ class _PlaybackControlBar extends StatelessWidget {
             ),
             IconButton(
               key: const ValueKey('stopButton'),
-              tooltip: '停止',
+              tooltip: AppLocalizations.of(context).stop,
               onPressed: _isActive ? onStop : null,
               icon: const Icon(Icons.stop),
               visualDensity: VisualDensity.compact,
@@ -257,6 +273,7 @@ class _InputBar extends StatelessWidget {
     required this.onChange,
     required this.isEmpty,
     required this.active,
+    required this.loading,
     required this.onSend,
     required this.onStop,
   });
@@ -265,11 +282,15 @@ class _InputBar extends StatelessWidget {
   final VoidCallback onChange;
   final bool isEmpty;
   final bool active;
+
+  /// 模型预加载中(发送按钮禁用)。
+  final bool loading;
   final VoidCallback onSend;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Material(
       color: AppColors.bg,
       child: SafeArea(
@@ -293,7 +314,7 @@ class _InputBar extends StatelessWidget {
                   onChanged: (_) => onChange(),
                   style: AppText.body,
                   decoration: InputDecoration(
-                    hintText: '输入要朗读的文本…',
+                    hintText: l10n.inputHint,
                     isDense: true,
                     suffixIcon: isEmpty
                         ? null
@@ -310,9 +331,17 @@ class _InputBar extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               FilledButton.icon(
                 key: const ValueKey('speakButton'),
-                onPressed: active ? onStop : onSend,
-                icon: Icon(active ? Icons.stop : Icons.send),
-                label: Text(active ? '停止' : '发送'),
+                onPressed: active ? onStop : (loading ? null : onSend),
+                icon: Icon(
+                  active
+                      ? Icons.stop
+                      : (loading ? Icons.hourglass_empty : Icons.send),
+                ),
+                label: Text(
+                  active
+                      ? l10n.stop
+                      : (loading ? l10n.loadingModel : l10n.send),
+                ),
               ),
             ],
           ),

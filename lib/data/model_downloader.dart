@@ -21,7 +21,11 @@ abstract class ModelDownloader {
   });
 }
 
-/// 基于 dio 的流式 HTTP 下载实现。
+/// 基于 dio 的流式 HTTP 下载实现,支持 **Range 断点续传**(大模型 100~350MB)。
+///
+/// - 目标文件已存在部分内容时,自动带 `Range: bytes=<offset>-` 从断点续传。
+/// - 服务端返回 206 → 增量追加;忽略 Range 返回 200(整包)→ 截断重下;
+///   返回 416/412(不支持续传)→ 删除部分文件整包重下。
 class HttpModelDownloader implements ModelDownloader {
   HttpModelDownloader({Dio? dio})
       : _dio = dio ??
@@ -43,11 +47,85 @@ class HttpModelDownloader implements ModelDownloader {
   }) async {
     final file = File(savePath);
     await file.parent.create(recursive: true);
-    await _dio.download(
-      url,
-      savePath,
-      cancelToken: cancelToken,
-      onReceiveProgress: onProgress,
-    );
+
+    // 已有部分文件 → 从该偏移续传。
+    var offset = 0;
+    if (await file.exists()) {
+      offset = await file.length();
+    }
+
+    final headers = <String, dynamic>{};
+    if (offset > 0) headers['Range'] = 'bytes=$offset-';
+
+    final Response<ResponseBody> response;
+    try {
+      response = await _dio.get<ResponseBody>(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: headers,
+        ),
+        cancelToken: cancelToken,
+      );
+    } on DioException catch (e) {
+      // 416/412:服务端不支持续传 → 删除部分文件整包重下。
+      final code = e.response?.statusCode;
+      if ((code == 416 || code == 412) && offset > 0) {
+        await file.delete();
+        return download(
+          url: url,
+          savePath: savePath,
+          onProgress: onProgress,
+          cancelToken: cancelToken,
+        );
+      }
+      rethrow;
+    }
+
+    final body = response.data!;
+
+    // 服务端忽略 Range 返回 200(整包):丢弃已有部分,从头覆盖。
+    final isPartial = body.statusCode == 206;
+    var start = isPartial ? offset : 0;
+    if (!isPartial && offset > 0) {
+      await file.delete();
+      offset = 0;
+    }
+
+    final total = _parseTotal(body.headers, offset);
+    final raf = await file.open(mode: FileMode.append);
+    try {
+      var received = 0;
+      await for (final chunk in body.stream) {
+        if (cancelToken?.isCancelled ?? false) {
+          throw DioException(
+            requestOptions: RequestOptions(path: url),
+            type: DioExceptionType.cancel,
+          );
+        }
+        await raf.writeFrom(chunk);
+        received += chunk.length;
+        onProgress?.call(start + received, total ?? -1);
+      }
+    } finally {
+      await raf.close();
+    }
+  }
+
+  /// 从响应头解析总字节数:`Content-Range: bytes start-end/total` 优先,
+  /// 其次 `Content-Length` + 已偏移量;无法解析返回 null。
+  static int? _parseTotal(Map<String, List<String>> headers, int offset) {
+    final contentRange = headers['content-range'];
+    if (contentRange != null && contentRange.isNotEmpty) {
+      final totalStr = contentRange.first.split('/').last.trim();
+      final total = int.tryParse(totalStr);
+      if (total != null) return total;
+    }
+    final contentLength = headers['content-length'];
+    if (contentLength != null && contentLength.isNotEmpty) {
+      final len = int.tryParse(contentLength.first);
+      if (len != null) return offset + len;
+    }
+    return null;
   }
 }

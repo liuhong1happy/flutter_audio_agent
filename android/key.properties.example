@@ -1,0 +1,21 @@
+# 正式签名配置模板。
+#
+# 使用方法:
+#   1. 生成 keystore(仅需一次,妥善保管密码):
+#      keytool -genkeypair -v -keystore android/app/upload-keystore.jks \
+#        -alias upload -keyalg RSA -keysize 2048 -validity 10000 \
+#        -storetype JKS
+#   2. 复制本文件为 android/key.properties,填好四个值(storeFile 相对
+#      android/app 目录),例如:
+#        storePassword=你的密码
+#        keyPassword=你的密码
+#        keyAlias=upload
+#        storeFile=upload-keystore.jks
+#   3. 构建 release: flutter build apk --release
+#      (未配置 key.properties 时自动回退 debug 签名,便于本地联调/CI)
+#
+# 注意:key.properties 与 keystore 均含私密信息,切勿提交到版本库。
+storePassword=
+keyPassword=
+keyAlias=
+storeFile=

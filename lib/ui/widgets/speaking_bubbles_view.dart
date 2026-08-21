@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/app_text.dart';
@@ -78,8 +79,8 @@ class _SpeakingBubblesViewState extends State<SpeakingBubblesView> {
   @override
   Widget build(BuildContext context) {
     if (widget.utterances.isEmpty) {
-      return const Center(
-        child: Text('输入文本后点击"发送",这里会逐条显示朗读气泡。'),
+      return Center(
+        child: Text(AppLocalizations.of(context).bubblesEmptyHint),
       );
     }
     return ListView.builder(
@@ -106,7 +107,7 @@ class _SpeakingBubblesViewState extends State<SpeakingBubblesView> {
   }
 }
 
-class _Bubble extends StatelessWidget {
+class _Bubble extends StatefulWidget {
   const _Bubble({
     required this.text,
     required this.words,
@@ -125,6 +126,14 @@ class _Bubble extends StatelessWidget {
   final UtteranceStats? stats;
   final VoidCallback? onTap;
 
+  @override
+  State<_Bubble> createState() => _BubbleState();
+}
+
+class _BubbleState extends State<_Bubble> {
+  /// 耗时统计默认折叠,点击展开,避免长气泡下占空间。
+  bool _statsExpanded = false;
+
   /// 按秒显示,秒后最多 3 位小数(去掉末尾 0)。
   static String _fmt(Duration d) {
     var s = (d.inMicroseconds / Duration.microsecondsPerSecond)
@@ -133,23 +142,28 @@ class _Bubble extends StatelessWidget {
     return '${s}s';
   }
 
-  String get _statsLine {
-    final s = stats;
+  String _statsLine(AppLocalizations l10n) {
+    final s = widget.stats;
     if (s == null || !s.hasData) return '';
-    return '分词 ${_fmt(s.tokenizeTime)} · 首词 ${_fmt(s.firstAudioLatency)}'
-        ' · 合成 ${_fmt(s.synthesisTotal)} · 播放 ${_fmt(s.audioDuration)}'
-        ' · 总 ${_fmt(s.processingTotal)}';
+    return l10n.statsLine(
+      _fmt(s.tokenizeTime),
+      _fmt(s.firstAudioLatency),
+      _fmt(s.synthesisTotal),
+      _fmt(s.audioDuration),
+      _fmt(s.processingTotal),
+    );
   }
 
   List<TextSpan> _buildSpans() {
     final spans = <TextSpan>[];
     var wordCount = 0;
 
-    for (final w in words) {
+    for (final w in widget.words) {
       final isReal = !w.isSeparator;
       final wordIndex = isReal ? wordCount++ : -1;
-      final isHighlight =
-          useWordHighlight && isReal && wordIndex == currentWordIndex;
+      final isHighlight = widget.useWordHighlight &&
+          isReal &&
+          wordIndex == widget.currentWordIndex;
 
       TextStyle style;
       if (isHighlight) {
@@ -158,10 +172,12 @@ class _Bubble extends StatelessWidget {
           fontWeight: FontWeight.w600,
           backgroundColor: AppColors.accentWeak,
         );
-      } else if (useWordHighlight && isReal && wordIndex < currentWordIndex) {
+      } else if (widget.useWordHighlight &&
+          isReal &&
+          wordIndex < widget.currentWordIndex) {
         // 已读词弱化。
         style = AppText.body.copyWith(color: AppColors.inkSecondary);
-      } else if (!isActive) {
+      } else if (!widget.isActive) {
         style = AppText.body.copyWith(color: AppColors.inkSecondary);
       } else {
         style = AppText.body.copyWith(color: AppColors.inkPrimary);
@@ -172,8 +188,8 @@ class _Bubble extends StatelessWidget {
     // 词列表为空时回退整句。
     if (spans.isEmpty) {
       spans.add(TextSpan(
-        text: text,
-        style: useWordHighlight
+        text: widget.text,
+        style: widget.useWordHighlight
             ? AppText.body.copyWith(
                 color: AppColors.accent,
                 fontWeight: FontWeight.w600,
@@ -187,14 +203,16 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = isActive ? AppColors.surface : AppColors.surfaceSunken;
+    final l10n = AppLocalizations.of(context);
+    final bg = widget.isActive ? AppColors.surface : AppColors.surfaceSunken;
+    final statsLine = _statsLine(l10n);
 
     return Align(
       alignment: Alignment.centerLeft,
       child: GestureDetector(
-        onTap: onTap,
+        onTap: widget.onTap,
         child: Container(
-          key: onTap != null ? ValueKey('bubble_$text') : null,
+          key: widget.onTap != null ? ValueKey('bubble_${widget.text}') : null,
           margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.lg,
@@ -208,10 +226,10 @@ class _Bubble extends StatelessWidget {
               bottomLeft: Radius.circular(16),
               bottomRight: Radius.circular(16),
             ),
-            border: isActive
+            border: widget.isActive
                 ? Border.all(color: AppColors.hairline, width: 1)
                 : null,
-            boxShadow: isActive ? AppShadow.e1 : null,
+            boxShadow: widget.isActive ? AppShadow.e1 : null,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -227,26 +245,30 @@ class _Bubble extends StatelessWidget {
                       style: AppText.body,
                     ),
                   ),
-                  if (onTap != null) ...[
+                  if (widget.onTap != null) ...[
                     const SizedBox(width: AppSpacing.sm),
                     Icon(
                       Icons.replay_outlined,
                       size: 16,
-                      color: isActive
+                      color: widget.isActive
                           ? AppColors.accent
                           : AppColors.inkTertiary,
                     ),
                   ],
                 ],
               ),
-              // 气泡下方:处理耗时统计,供使用者参考。
-              if (_statsLine.isNotEmpty) ...[
+              // 气泡下方:耗时统计默认折叠,点击展开/收起,避免占空间。
+              if (statsLine.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.xs),
-                Text(
-                  _statsLine,
-                  style: AppText.caption.copyWith(
-                    color: AppColors.inkTertiary,
-                    fontSize: 11,
+                GestureDetector(
+                  onTap: () => setState(() => _statsExpanded = !_statsExpanded),
+                  behavior: HitTestBehavior.opaque,
+                  child: Text(
+                    _statsExpanded ? statsLine : l10n.statsToggle,
+                    style: AppText.caption.copyWith(
+                      color: AppColors.inkTertiary,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ],

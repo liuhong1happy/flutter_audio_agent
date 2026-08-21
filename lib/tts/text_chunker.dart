@@ -34,6 +34,8 @@ class TtsSegment {
 ///
 /// 气泡 = 用户一次输入的**整段文本**,而不是逐句。合成时按句分块,
 /// 但展示上是一条气泡,内部做逐词高亮。附处理耗时统计供气泡展示。
+///
+/// 分块相关字段在"历史恢复 + 重读"时会被重建,故不为 final。
 class Utterance {
   Utterance({
     required this.originalText,
@@ -50,17 +52,17 @@ class Utterance {
   /// 归一化后(用于朗读展示与逐词高亮)。
   final String normalizedText;
 
-  /// 分句结果。
-  final List<TtsSegment> segments;
+  /// 分句结果(历史恢复后为空,重读时重建)。
+  List<TtsSegment> segments;
 
   /// 每段的词级切分(与 [segments] 平行,offset 基于段内文本)。
-  final List<List<WordSpan>> segmentWords;
+  List<List<WordSpan>> segmentWords;
 
   /// 整段归一化文本的词级切分(offset 基于 [normalizedText])。
-  final List<WordSpan> allWords;
+  List<WordSpan> allWords;
 
-  /// 归一化结果(原文视图回映射用)。
-  final NormalizationResult? normalization;
+  /// 归一化结果(原文视图回映射用;历史恢复后为空,重读时重建)。
+  NormalizationResult? normalization;
 
   /// 处理耗时统计(合成过程中由服务填充)。
   final UtteranceStats stats = UtteranceStats();
@@ -169,6 +171,31 @@ class TextChunker {
 
   static bool _isSentenceBreak(String ch) => _sentenceBreaks.contains(ch);
 
+  /// 词级时长权重(近似朗读时长):英文按"元音簇"估算音节数,数字按位数。
+  ///
+  /// 比"字符数"更贴近实际朗读时长(如 `world` 5 字符但只 1 个音节),
+  /// 用于"段音频时长 ∝ 词权重"的逐词高亮推进。CJK 由 jieba 分支
+  /// 按字符数(1 字 ≈ 1 音节)处理。
+  static int _tokenDurationWeight(String token) {
+    var weight = 0;
+    var prevVowel = false;
+    for (var i = 0; i < token.length; i++) {
+      final ch = token[i];
+      final code = ch.codeUnitAt(0);
+      final isLetter = (code >= 0x61 && code <= 0x7A) ||
+          (code >= 0x41 && code <= 0x5A);
+      if (isLetter) {
+        final isVowel = 'aeiouy'.contains(ch.toLowerCase());
+        if (isVowel && !prevVowel) weight++; // 新元音簇 = 1 音节。
+        prevVowel = isVowel;
+      } else {
+        weight++; // 数字等:每字符 1 单位。
+        prevVowel = false;
+      }
+    }
+    return weight < 1 ? 1 : weight;
+  }
+
   static bool _isCjk(String ch) {
     final code = ch.codeUnitAt(0);
     return (code >= 0x4E00 && code <= 0x9FFF) ||
@@ -237,7 +264,7 @@ class TextChunker {
             text: token,
             start: runStart + m.start,
             end: runStart + m.end,
-            weight: isWord ? token.length : 0,
+            weight: isWord ? _tokenDurationWeight(token) : 0,
           ));
           lastEnd = m.end;
         }

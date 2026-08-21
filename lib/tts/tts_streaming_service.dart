@@ -2,6 +2,10 @@
 ///
 /// 流程:原文 → 归一化 → 分句/分词 → 后台 isolate 逐句合成 →
 /// 顺序播放器排队播放;播放中更新"当前片段"以驱动 UI 高亮与自动滚动。
+///
+/// 合成采用**拉取式**:播放器在需要时通过 [AudioPlaybackQueue.nextSegmentProvider]
+/// 索取下一段 WAV,一次最多预取 1 段,长文本下内存有界、主 isolate 不被
+/// "急切合成 + 无界队列"拖垮。
 // ignore_for_file: prefer_initializing_formals
 library;
 
@@ -51,13 +55,6 @@ class TtsStreamingService extends ChangeNotifier {
       _currentSegment = index;
       _startWordTracking(index);
       _notifyPhase();
-    };
-    _player.onQueueDrained = () {
-      _stopWordTracking();
-      if (!_cancelled && _phase != StreamingPhase.error) {
-        _phase = StreamingPhase.finished;
-        notifyListeners();
-      }
     };
   }
 
@@ -224,8 +221,12 @@ class TtsStreamingService extends ChangeNotifier {
   /// 会话令牌:每次 speak/stop 递增,用于丢弃过期合成的音频。
   int _session = 0;
 
-  /// 每段已合成 WAV 的缓存(按片段下标),供"气泡重读"复用。
-  final Map<int, Uint8List> _segmentWavs = {};
+  /// 模型是否正在加载(进入合成页时预加载;加载期间发送按钮不可用)。
+  bool _modelLoading = false;
+  bool get modelLoading => _modelLoading;
+
+  /// 进行中的模型加载 Future(并发调用共享,避免重复加载)。
+  Future<void>? _modelLoadFuture;
 
   /// 每段的词级切分(供逐词高亮与全局词索引)。
   List<List<WordSpan>> _segmentWords = [];
@@ -242,6 +243,9 @@ class TtsStreamingService extends ChangeNotifier {
   /// 聊天气泡历史:每次输入一条 Utterance。
   final List<Utterance> _utterances = [];
 
+  /// 是否已从持久化恢复(仅首次 [loadHistory] 生效,避免覆盖运行时新增气泡)。
+  bool _historyLoaded = false;
+
   /// 当前正在朗读的气泡下标(默认最新)。
   int _activeIndex = -1;
 
@@ -252,8 +256,6 @@ class TtsStreamingService extends ChangeNotifier {
 
   /// 当前正在朗读的词(整段内的全局下标)。
   int get currentWordIndex => _currentWordIndex;
-
-  List<List<WordSpan>> get segmentWords => _segmentWords;
 
   /// 气泡历史(一次输入一条)。
   List<Utterance> get utterances => List.unmodifiable(_utterances);
@@ -283,6 +285,52 @@ class TtsStreamingService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 预加载当前所选模型(已加载则忽略)。
+  ///
+  /// 进入合成页时调用,让首次朗读免去加载等待;加载期间
+  /// [modelLoading] 为 true,UI 可据此禁用发送按钮。
+  Future<bool> prepareModel() async {
+    try {
+      return await _ensureModelLoaded();
+    } catch (e) {
+      debugPrint('模型预加载失败(将在朗读时重试): $e');
+      return false;
+    }
+  }
+
+  /// 确保所选模型已加载到引擎;并发调用共享同一个加载 Future。
+  ///
+  /// 返回 true = 已就绪/加载完成;false = 无需加载(无模型/未下载/文件缺失)。
+  Future<bool> _ensureModelLoaded() async {
+    if (_modelLoadFuture != null) {
+      await _modelLoadFuture;
+      return true;
+    }
+    final model = ModelCatalog.byId(_settings.selectedModelId);
+    if (model == null) return false;
+    if (!_modelManager.isDownloaded(model.id)) return false;
+    final paths = _modelManager.resolveModel(model);
+    if (paths == null) return false;
+    if (_engine.isLoaded && _loadedModelId == model.id) return true; // 已加载忽略。
+
+    _modelLoading = true;
+    notifyListeners();
+    try {
+      _modelLoadFuture = _engine.load(
+        paths: paths,
+        model: model,
+        settings: _settings,
+      );
+      await _modelLoadFuture;
+      _loadedModelId = model.id;
+      return true;
+    } finally {
+      _modelLoadFuture = null;
+      _modelLoading = false;
+      notifyListeners();
+    }
+  }
+
   /// 开始朗读 [rawText]。
   Future<void> speak(String rawText) async {
     await stop();
@@ -307,7 +355,7 @@ class TtsStreamingService extends ChangeNotifier {
       final norm = _normalizer.normalize(trimmed);
       _normalization = norm;
 
-      // 2. 词级切分 + 渐进分块(1+2+4+…):首词尽快出声,后逐步放宽粒度。
+      // 2. 词级切分 + 渐进分块:首词尽快出声,后逐步放宽粒度。
       await _chunker.ensureInitialized();
       final flatWords = _chunker.splitWords(norm.text);
       final chunks = _buildProgressiveChunks(flatWords, norm.text);
@@ -345,22 +393,21 @@ class TtsStreamingService extends ChangeNotifier {
       if (!_engine.isLoaded || _loadedModelId != model.id) {
         _phase = StreamingPhase.preparing;
         notifyListeners();
-        await _engine.load(paths: paths, model: model, settings: _settings);
-        _loadedModelId = model.id;
+        final ok = await _ensureModelLoaded();
+        if (!ok) {
+          throw StateError('模型加载失败,请重新下载或更换模型');
+        }
       }
 
-      // 4. 逐句合成入队(后台 isolate,主 isolate 播放不受阻)。
+      // 4. 拉取式逐段合成播放(首段尽快出声)。
       _phase = StreamingPhase.synthesizing;
-      _segmentWavs.clear();
       notifyListeners();
 
-      await _synthesizeSegments(
+      _startPullPlayback(
         session,
         speakWatch: speakWatch,
         utterance: _utterances.last,
       );
-      await _persistHistory();
-      notifyListeners(); // 刷新气泡耗时统计。
     } catch (e) {
       _lastError = '$e';
       _phase = StreamingPhase.error;
@@ -368,60 +415,70 @@ class TtsStreamingService extends ChangeNotifier {
     }
   }
 
-  /// 逐句合成并顺序入队(返回 true = 正常完成,false = 中途出错/被取消)。
-  ///
-  /// [speakWatch] 从本次朗读开始计时;[utterance] 用于写入耗时统计。
-  Future<bool> _synthesizeSegments(
+  /// 配置播放器为"拉取式":provider 按需合成一段 WAV,播完最后一段时
+  /// 汇总耗时统计并持久化。由 [speak] / [replayUtterance] 调用,立即返回。
+  void _startPullPlayback(
     int session, {
     required Stopwatch speakWatch,
-    Utterance? utterance,
-  }) async {
-    final synthWatch = Stopwatch()..start();
+    required Utterance utterance,
+  }) {
+    var synthMs = 0;
     var firstAudioSet = false;
 
-    for (var i = 0; i < _segments.length; i++) {
-      if (session != _session || _cancelled) break;
-      final seg = _segments[i];
+    _player.nextSegmentProvider = (index) async {
+      if (session != _session || _cancelled) return null;
+      if (index < 0 || index >= _segments.length) return null;
+      final seg = _segments[index];
       try {
+        final genWatch = Stopwatch()..start();
         final audio = await _engine.generate(
           text: seg.text,
           sid: _settings.sid,
           speed: _settings.speed,
         );
-        if (session != _session || _cancelled) break;
+        genWatch.stop();
+        if (session != _session || _cancelled) return null;
         // 首词音频就绪时间。
         if (!firstAudioSet) {
           firstAudioSet = true;
-          utterance?.stats.firstAudioLatency = speakWatch.elapsed;
+          utterance.stats.firstAudioLatency = speakWatch.elapsed;
         }
-        _segmentDurations[i] = audio.sampleRate > 0
+        synthMs += genWatch.elapsed.inMilliseconds;
+        _segmentDurations[index] = audio.sampleRate > 0
             ? audio.samples.length / audio.sampleRate
             : 0;
-        final wav = wavBytes(audio.samples, audio.sampleRate);
-        _segmentWavs[i] = wav; // 缓存供重读。
-        _player.enqueue(segmentIndex: i, wavBytes: wav);
+        return wavBytes(audio.samples, audio.sampleRate);
       } on Exception catch (e) {
-        if (session != _session || _cancelled) break;
-        _lastError = '第 ${i + 1} 段合成失败: $e';
+        if (session != _session || _cancelled) return null;
+        _lastError = '第 ${index + 1} 段合成失败: $e';
         _phase = StreamingPhase.error;
         notifyListeners();
-        return false;
+        return null;
       }
-    }
+    };
 
-    // 汇总耗时统计。
-    if (utterance != null) {
-      utterance.stats.synthesisTotal = synthWatch.elapsed;
+    _player.onQueueDrained = () {
+      _stopWordTracking();
+      // 汇总耗时统计。
+      utterance.stats.synthesisTotal = Duration(milliseconds: synthMs);
       var totalMs = 0;
       for (final d in _segmentDurations.values) {
         totalMs += (d * 1000).round();
       }
       utterance.stats.audioDuration = Duration(milliseconds: totalMs);
-    }
-    return true;
+      if (session == _session && !_cancelled && _phase != StreamingPhase.error) {
+        _phase = StreamingPhase.finished;
+        notifyListeners();
+      }
+      unawaited(_persistHistory());
+    };
+
+    unawaited(_player.play());
   }
 
   /// 重读某条历史气泡(整段文本,原位播放,不追加新气泡)。
+  ///
+  /// 历史恢复的气泡 `segments` 为空,这里会先用归一化文本重新分块再合成。
   Future<void> replayUtterance(int index) async {
     if (index < 0 || index >= _utterances.length) return;
     final u = _utterances[index];
@@ -431,6 +488,19 @@ class TtsStreamingService extends ChangeNotifier {
     await _player.stop();
     _stopWordTracking();
 
+    // 历史恢复的气泡没有分块信息,重建后再播放。
+    if (u.segments.isEmpty) {
+      await _chunker.ensureInitialized();
+      final text = u.normalizedText.isEmpty ? u.originalText : u.normalizedText;
+      final norm = _normalizer.normalize(text);
+      final flat = _chunker.splitWords(norm.text);
+      final chunks = _buildProgressiveChunks(flat, norm.text);
+      u.segments = chunks.map((c) => c.segment).toList();
+      u.segmentWords = chunks.map((c) => c.words).toList();
+      u.allWords = flat;
+      u.normalization = norm;
+    }
+
     _activeIndex = index;
     _segments = u.segments;
     _segmentWords = u.segmentWords;
@@ -438,20 +508,17 @@ class TtsStreamingService extends ChangeNotifier {
     _rawText = u.originalText;
     _currentSegment = -1;
     _segmentDurations.clear();
-    _segmentWavs.clear();
 
     _phase = StreamingPhase.synthesizing;
     notifyListeners();
 
     final session = _session;
     _cancelled = false;
-    await _synthesizeSegments(
+    _startPullPlayback(
       session,
       speakWatch: Stopwatch()..start(),
       utterance: u,
     );
-    await _persistHistory();
-    notifyListeners();
   }
 
   /// 暂停朗读(仅播放中/合成中可暂停)。
@@ -479,45 +546,6 @@ class TtsStreamingService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 重读某一段(气泡点击)。复用已缓存音频,未缓存则现合成。
-  ///
-  /// 会停止当前整段流水线,只播放指定片段;气泡列表保留。
-  Future<void> replaySegment(int index) async {
-    if (index < 0 || index >= _segments.length) return;
-
-    _session++;
-    _cancelled = true;
-    await _player.stop();
-    _currentSegment = index;
-    _startWordTracking(index);
-
-    var wav = _segmentWavs[index];
-    if (wav == null) {
-      try {
-        final seg = _segments[index];
-        final audio = await _engine.generate(
-          text: seg.text,
-          sid: _settings.sid,
-          speed: _settings.speed,
-        );
-        wav = wavBytes(audio.samples, audio.sampleRate);
-        _segmentDurations[index] = audio.sampleRate > 0
-            ? audio.samples.length / audio.sampleRate
-            : 0;
-        _segmentWavs[index] = wav;
-      } on Exception {
-        _lastError = '第 ${index + 1} 段合成失败';
-        _phase = StreamingPhase.error;
-        notifyListeners();
-        return;
-      }
-    }
-
-    _phase = StreamingPhase.playing;
-    notifyListeners();
-    _player.enqueue(segmentIndex: index, wavBytes: wav);
-  }
-
   /// 停止播放;保留已分句的气泡列表(可继续重读),下次 speak 时替换。
   Future<void> stop() async {
     _session++;
@@ -539,7 +567,12 @@ class TtsStreamingService extends ChangeNotifier {
   }
 
   /// 从 flutter_dva 恢复气泡历史(轻量:原文/归一化/毫秒耗时)。
+  ///
+  /// 仅首次调用生效:运行时气泡以本服务为单一事实源,避免重复 load
+  /// 覆盖用户本次会话新增的气泡。
   Future<void> loadHistory() async {
+    if (_historyLoaded) return;
+    _historyLoaded = true;
     final store = dvaStore();
     if (store == null) return;
     final h = store.getStateByKey<HistoryState>('history');

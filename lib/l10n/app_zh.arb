@@ -1,0 +1,118 @@
+{
+  "@@locale": "zh",
+  "appTitle": "Flutter TTS Demo",
+
+  "synthesizeTab": "合成",
+  "settingsTab": "设置",
+  "modelsTab": "模型",
+
+  "statusReady": "已选模型",
+  "statusNoModel": "未选择模型",
+  "statusNotDownloaded": "所选模型未下载",
+
+  "phaseIdle": "就绪",
+  "phasePreparing": "准备中…",
+  "phaseSynthesizing": "合成中…",
+  "phasePlaying": "播放中 {current}/{total}",
+  "@phasePlaying": {
+    "description": "播放中显示当前段/总段数",
+    "placeholders": {
+      "current": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
+  "phasePaused": "已暂停 {current}/{total}",
+  "@phasePaused": {
+    "description": "暂停时显示进度",
+    "placeholders": {
+      "current": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
+  "phaseFinished": "播放完成",
+  "phaseError": "出错",
+
+  "pause": "暂停",
+  "resume": "继续",
+  "stop": "停止",
+  "send": "发送",
+  "loadingModel": "加载中",
+  "inputHint": "输入要朗读的文本…",
+  "emptyTextError": "请输入文本",
+  "genericError": "发生错误",
+  "goSettings": "去设置",
+
+  "settingsTitle": "TTS 设置",
+  "sectionModel": "模型",
+  "noModelDownloaded": "尚未下载任何模型",
+  "noModelHint": "先到模型管理页下载一个模型,再回来选择。",
+  "goModel": "去下载",
+  "selectModelLabel": "选择模型",
+  "modelSpeakerCount": "{name} ({count} 音色)",
+  "@modelSpeakerCount": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "count": {"type": "int"}
+    }
+  },
+  "modelNotSelected": "未选择模型,合成前需要先选择。",
+  "speakerLabel": "说话人 (sid {sid})",
+  "@speakerLabel": {
+    "placeholders": {"sid": {"type": "int"}}
+  },
+  "speedLabel": "语速 {speed}x",
+  "@speedLabel": {
+    "description": "speed 为已格式化的语速字符串(如 1.50)",
+    "placeholders": {"speed": {"type": "String"}}
+  },
+  "silenceLabel": "句间静音 {percent}%",
+  "@silenceLabel": {
+    "placeholders": {"percent": {"type": "int"}}
+  },
+  "threadLabel": "推理线程 {threads}",
+  "@threadLabel": {
+    "placeholders": {"threads": {"type": "int"}}
+  },
+  "downloadSource": "下载源",
+  "mirrorSourceLabel": "下载源(国内网络自动回退代理)",
+  "mirrorAuto": "自动(国内代理+直连回退,推荐)",
+  "mirrorCustom": "自定义镜像前缀",
+  "mirrorPrefixLabel": "镜像前缀(如 https://ghfast.top/)",
+  "autoScroll": "自动滚动跟随朗读",
+
+  "modelManageTitle": "模型管理",
+  "diskUsage": "占用 {mb}MB",
+  "@diskUsage": {
+    "description": "mb 为已格式化的 MB 字符串(如 12.3)",
+    "placeholders": {"mb": {"type": "String"}}
+  },
+  "clearAll": "清理全部缓存(删除所有模型)",
+  "clearAllTitle": "清理全部缓存",
+  "clearAllConfirm": "将删除所有已下载模型与音频缓存,并重置已下载标记。\n此操作不可恢复。",
+  "cancel": "取消",
+  "confirmClear": "确认清理",
+  "deleteModel": "删除模型",
+  "cancelDownload": "取消下载",
+  "download": "下载",
+
+  "bubblesEmptyHint": "输入文本后点击\"发送\",这里会逐条显示朗读气泡。",
+  "statsToggle": "耗时统计 ▸",
+  "statTokenize": "分词",
+  "statFirstAudio": "首词",
+  "statSynthesis": "合成",
+  "statPlayback": "播放",
+  "statTotal": "总",
+  "statsLine": "分词 {tokenize} · 首词 {first} · 合成 {synthesis} · 播放 {playback} · 总 {total}",
+  "@statsLine": {
+    "description": "气泡下方耗时统计(各指标为格式化后的时长字符串)",
+    "placeholders": {
+      "tokenize": {"type": "String"},
+      "first": {"type": "String"},
+      "synthesis": {"type": "String"},
+      "playback": {"type": "String"},
+      "total": {"type": "String"}
+    }
+  },
+
+  "streamingEmptyHint": "输入文本后点击\"合成并播放\",这里会逐句高亮显示朗读进度。"
+}

@@ -135,8 +135,18 @@ class SherpaTtsEngine implements TtsEngine {
     if (result is! List || result.length < 2) {
       throw StateError('合成返回异常');
     }
-    final samples = result[0] as Float32List;
+    final payload0 = result[0];
     final sampleRate = result[1] as int;
+    final Float32List samples;
+    if (payload0 is TransferableTypedData) {
+      // 正常路径:零拷贝移交采样缓冲区。
+      samples = payload0.materialize().asFloat32List();
+    } else if (payload0 is Float32List) {
+      // 空音频兜底路径。
+      samples = payload0;
+    } else {
+      throw StateError('合成返回异常');
+    }
     if (samples.isEmpty) {
       throw StateError('合成结果为空');
     }
@@ -262,9 +272,14 @@ void _workerEntry(SendPort mainPort) {
             sid: g.sid,
             speed: g.speed,
           );
+          // 用 TransferableTypedData 零拷贝移交采样数据,避免长文本下
+          // 逐段 Float32List 跨 isolate 拷贝的开销。
+          final Object samplesPayload = audio.samples.isNotEmpty
+              ? TransferableTypedData.fromList([audio.samples])
+              : Float32List(0);
           mainPort.send(_WorkerReply(
             id: msg.id,
-            payload: [audio.samples, audio.sampleRate],
+            payload: [samplesPayload, audio.sampleRate],
           ));
         default:
           mainPort.send(_WorkerReply(id: msg.id, error: '未知命令'));

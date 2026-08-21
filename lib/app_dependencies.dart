@@ -5,6 +5,7 @@
 // ignore_for_file: prefer_initializing_formals
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'data/app_paths.dart';
@@ -94,5 +95,9 @@ class AppDependencies {
     );
     // 恢复持久化的气泡历史(含毫秒级耗时统计)。
     await streamingService.loadHistory();
+
+    // 后台预加载当前所选模型(已加载则忽略),让首次朗读免去加载等待;
+    // 加载期间 streamingService.modelLoading == true。
+    unawaited(streamingService.prepareModel());
   }
 }

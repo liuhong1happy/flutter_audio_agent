@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/model_manager.dart';
+import '../l10n/app_localizations.dart';
 import 'model_manage_page.dart';
 import 'synthesize_page.dart';
 import 'tts_settings_page.dart';
@@ -27,6 +28,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<ModelManager>();
+    final l10n = AppLocalizations.of(context);
     final hasDownloads = manager.hasActiveDownloads;
 
     return Scaffold(
@@ -42,10 +44,10 @@ class _MainShellState extends State<MainShell> {
         selectedIndex: _index,
         onDestinationSelected: _switchTo,
         destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.graphic_eq_outlined),
-            selectedIcon: Icon(Icons.graphic_eq),
-            label: '合成',
+          NavigationDestination(
+            icon: const Icon(Icons.graphic_eq_outlined),
+            selectedIcon: const Icon(Icons.graphic_eq),
+            label: l10n.synthesizeTab,
           ),
           NavigationDestination(
             key: const ValueKey('tabModel'),
@@ -61,12 +63,12 @@ class _MainShellState extends State<MainShell> {
                     child: const Icon(Icons.download_for_offline),
                   )
                 : const Icon(Icons.download_for_offline),
-            label: '模型',
+            label: l10n.modelsTab,
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: '设置',
+          NavigationDestination(
+            icon: const Icon(Icons.settings_outlined),
+            selectedIcon: const Icon(Icons.settings),
+            label: l10n.settingsTab,
           ),
         ],
       ),

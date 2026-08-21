@@ -64,7 +64,7 @@ class FakeTtsEngine implements TtsEngine {
   }
 }
 
-/// 假顺序播放器:不触碰真实音频设备,用计时器模拟逐段播放,
+/// 假顺序播放器:不触碰真实音频设备,拉取式逐段模拟播放,
 /// 驱动 onSegmentStarted / onQueueDrained 回调。
 class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
   FakeAudioPlaybackQueue({
@@ -73,16 +73,18 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
 
   final Duration delayPerSegment;
 
-  /// 已入队的片段下标(按入队顺序)。
-  final List<int> enqueuedSegmentIndexes = [];
-
-  /// 已开始"播放"的片段下标。
+  /// 已开始"播放"的片段下标(按播放顺序)。
   final List<int> startedSegmentIndexes = [];
 
-  int _head = 0;
-  bool _timerActive = false;
+  int _nextIndex = 0;
+  bool _running = false;
   bool _paused = false;
-  Timer? _currentTimer;
+  bool _stopped = true;
+  Future<void>? _activeDrive;
+
+  /// 会话代数:每次 play/stop 递增,旧 drive 检测到代数变化即退出,
+  /// 避免旧 drive 误用新会话的 _running/_stopped 状态。
+  int _generation = 0;
   int pauseCount = 0;
   int resumeCount = 0;
 
@@ -92,44 +94,56 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
   @override
   void Function()? onQueueDrained;
 
-  /// 取消挂起的定时器,避免测试结束时 "pending timer"。
-  void _cancelTimer() {
-    _currentTimer?.cancel();
-    _currentTimer = null;
-    _timerActive = false;
-  }
+  @override
+  Future<Uint8List?> Function(int segmentIndex)? nextSegmentProvider;
 
   @override
-  void enqueue({required int segmentIndex, required Uint8List wavBytes}) {
-    enqueuedSegmentIndexes.add(segmentIndex);
-    if (!_timerActive) _pump();
+  Future<void> play() async {
+    final gen = ++_generation;
+    // 等上一次 drive 完全退出,避免旧 drive 误用新会话状态。
+    if (_activeDrive != null) {
+      try {
+        await _activeDrive;
+      } catch (_) {}
+    }
+    if (gen != _generation) return; // 等待期间又被 stop/play 取代。
+    _stopped = false;
+    _paused = false;
+    _running = true;
+    _nextIndex = 0;
+    _activeDrive = _drive(gen);
+    unawaited(_activeDrive!);
   }
 
-  void _pump() {
-    if (_head >= enqueuedSegmentIndexes.length) {
-      _timerActive = false;
-      return;
+  Future<void> _drive(int gen) async {
+    try {
+      while (_running && !_stopped) {
+        if (gen != _generation) return; // 已被新会话取代。
+        // 暂停时挂起(保留进度),恢复后继续。
+        if (_paused) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          continue;
+        }
+        final provider = nextSegmentProvider;
+        if (provider == null) break;
+        final idx = _nextIndex;
+        final wav = await provider(idx);
+        if (gen != _generation) return;
+        if (!_running || _stopped) return;
+        if (wav == null) break;
+        startedSegmentIndexes.add(idx);
+        onSegmentStarted?.call(idx);
+        _nextIndex = idx + 1;
+        // 模拟该段播放时长。
+        await Future<void>.delayed(delayPerSegment);
+      }
+      if (gen == _generation && !_stopped && !_paused) {
+        _running = false;
+        onQueueDrained?.call();
+      }
+    } catch (_) {
+      // 忽略 provider 异常;真实播放器会由 provider 自行捕获。
     }
-    _timerActive = true;
-    _currentTimer = Timer(delayPerSegment, () {
-      if (_paused) {
-        _timerActive = false;
-        return;
-      }
-      startedSegmentIndexes.add(enqueuedSegmentIndexes[_head]);
-      onSegmentStarted?.call(enqueuedSegmentIndexes[_head]);
-      _head++;
-      if (_head >= enqueuedSegmentIndexes.length) {
-        // 最后一段:再"播放"一个时长后 drain,让词高亮有机会推进。
-        _timerActive = true;
-        _currentTimer = Timer(delayPerSegment, () {
-          _timerActive = false;
-          onQueueDrained?.call();
-        });
-      } else {
-        _pump();
-      }
-    });
   }
 
   @override
@@ -140,16 +154,17 @@ class FakeAudioPlaybackQueue implements AudioPlaybackQueue {
 
   @override
   Future<void> resume() async {
+    if (!_paused) return;
     _paused = false;
     resumeCount++;
-    if (!_timerActive) _pump();
   }
 
   @override
   Future<void> stop() async {
-    _cancelTimer();
-    _head = enqueuedSegmentIndexes.length;
+    _generation++;
+    _stopped = true;
     _paused = false;
+    _running = false;
   }
 
   @override
@@ -188,10 +203,13 @@ class FakeModelDownloader implements ModelDownloader {
 }
 
 /// 构造一个内含占位模型文件的 tar.bz2。
+///
+/// `model.onnx` 写入 4096 字节,使"主模型非平凡大小"校验在测试中可通过。
 Uint8List buildFakeModelArchive() {
   const base = 'vits-piper-zh_CN-xiao_ya-medium-int8';
   final archive = Archive();
-  archive.addFile(ArchiveFile.string('$base/model.onnx', ''));
+  final onnxBytes = List<int>.filled(4096, 7);
+  archive.addFile(ArchiveFile('$base/model.onnx', onnxBytes.length, onnxBytes));
   archive.addFile(ArchiveFile.string('$base/tokens.txt', ''));
   archive.addFile(ArchiveFile.string('$base/lexicon.txt', ''));
   archive.addFile(ArchiveFile.string('$base/number.fst', ''));

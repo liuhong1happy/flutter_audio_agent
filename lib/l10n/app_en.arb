@@ -1,0 +1,77 @@
+{
+  "@@locale": "en",
+  "appTitle": "Flutter TTS Demo",
+
+  "synthesizeTab": "Synthesize",
+  "settingsTab": "Settings",
+  "modelsTab": "Models",
+
+  "statusReady": "Model ready",
+  "statusNoModel": "No model selected",
+  "statusNotDownloaded": "Model not downloaded",
+
+  "phaseIdle": "Ready",
+  "phasePreparing": "Preparing…",
+  "phaseSynthesizing": "Synthesizing…",
+  "phasePlaying": "Playing {current}/{total}",
+  "phasePaused": "Paused {current}/{total}",
+  "phaseFinished": "Finished",
+  "phaseError": "Error",
+
+  "pause": "Pause",
+  "resume": "Resume",
+  "stop": "Stop",
+  "send": "Send",
+  "loadingModel": "Loading…",
+  "inputHint": "Enter text to read…",
+  "emptyTextError": "Please enter text",
+  "genericError": "Something went wrong",
+  "goSettings": "Go to settings",
+
+  "settingsTitle": "TTS Settings",
+  "sectionModel": "Model",
+  "noModelDownloaded": "No model downloaded yet",
+  "noModelHint": "Download a model first, then select it here.",
+  "goModel": "Download",
+  "selectModelLabel": "Select model",
+  "modelSpeakerCount": "{name} ({count} voices)",
+  "modelNotSelected": "No model selected. Select one before synthesizing.",
+  "speakerLabel": "Speaker (sid {sid})",
+  "speedLabel": "Speed {speed}x",
+  "@speedLabel": {
+    "placeholders": {"speed": {"type": "String"}}
+  },
+  "silenceLabel": "Inter-sentence silence {percent}%",
+  "threadLabel": "Inference threads {threads}",
+  "downloadSource": "Download source",
+  "mirrorSourceLabel": "Download source (proxy fallback)",
+  "mirrorAuto": "Auto (proxy + direct fallback)",
+  "mirrorCustom": "Custom mirror prefix",
+  "mirrorPrefixLabel": "Mirror prefix (e.g. https://ghfast.top/)",
+  "autoScroll": "Auto-scroll while reading",
+
+  "modelManageTitle": "Model management",
+  "diskUsage": "Disk {mb}MB",
+  "@diskUsage": {
+    "placeholders": {"mb": {"type": "String"}}
+  },
+  "clearAll": "Clear all cache (delete all models)",
+  "clearAllTitle": "Clear all cache",
+  "clearAllConfirm": "This deletes all downloaded models and audio cache, and resets download status.\nThis cannot be undone.",
+  "cancel": "Cancel",
+  "confirmClear": "Clear",
+  "deleteModel": "Delete model",
+  "cancelDownload": "Cancel",
+  "download": "Download",
+
+  "bubblesEmptyHint": "Enter text and tap Send. Bubbles appear here.",
+  "statsToggle": "Stats ▸",
+  "statTokenize": "Tokenize",
+  "statFirstAudio": "First",
+  "statSynthesis": "Synth",
+  "statPlayback": "Play",
+  "statTotal": "Total",
+  "statsLine": "Tokenize {tokenize} · First {first} · Synth {synthesis} · Play {playback} · Total {total}",
+
+  "streamingEmptyHint": "Enter text and tap to synthesize. Segments highlight here."
+}

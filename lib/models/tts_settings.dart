@@ -12,6 +12,12 @@ import '../dva/app_dva.dart';
 import '../dva/app_models.dart';
 
 class TtsSettings extends ChangeNotifier {
+  /// 是否已从持久化恢复(仅首次 [load] 生效,后续调用为幂等 no-op)。
+  ///
+  /// 运行时以本 ChangeNotifier 为单一事实源;持久化(flutter_dva)只做
+  /// 写入,避免"运行时改动被重复 load 覆盖"的漂移。
+  bool _loaded = false;
+
   /// 当前选中的模型 id(未选择为 null)。
   String? _selectedModelId;
   String? get selectedModelId => _selectedModelId;
@@ -40,8 +46,10 @@ class TtsSettings extends ChangeNotifier {
   bool _autoScroll = true;
   bool get autoScroll => _autoScroll;
 
-  /// 从 dva store 恢复持久化设置。
+  /// 从 dva store 恢复持久化设置(仅首次调用生效)。
   Future<void> load() async {
+    if (_loaded) return;
+    _loaded = true;
     final store = dvaStore();
     if (store != null) {
       final s = store.getStateByKey<SettingsState>('settings');
