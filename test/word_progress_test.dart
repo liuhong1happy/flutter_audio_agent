@@ -163,6 +163,85 @@ void main() {
     tempDir.deleteSync(recursive: true);
   });
 
+  test('分块:按中英文逗号切句,块落在自然短语边界', () async {
+    SharedPreferences.setMockInitialValues({});
+    final tempDir = Directory.systemTemp.createTempSync('comma_');
+
+    final deps = AppDependencies(
+      engine: FakeTtsEngine(segmentDuration: Duration.zero),
+      downloader: FakeModelDownloader(),
+      chunker: TextChunker(enableJieba: false),
+      extractor: const ArchiveExtractor(useCompute: false),
+      player: FakeAudioPlaybackQueue(),
+      modelsDirProvider: () async => Directory('${tempDir.path}/models'),
+      audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    );
+    await deps.init();
+    final model = ModelCatalog.all.first;
+    await deps.modelManager.downloadModel(model);
+    await deps.settings.selectModel(model.id);
+
+    // 中文逗号:3 个短语 → 3 块,块尾即逗号/句号(不跨逗号)。
+    await deps.streamingService.speak('今天天气不错,我们一起去公园玩,顺便吃饭。');
+    final segs1 = deps.streamingService.segments;
+    expect(segs1, hasLength(3), reason: '应按中文逗号切成 3 个短语块');
+    expect(segs1.map((s) => s.text).join(),
+        deps.streamingService.normalization!.text,
+        reason: '拼接应完整覆盖全文');
+    expect(segs1[0].text.endsWith(','), isTrue);
+    expect(segs1[1].text.endsWith(','), isTrue);
+    expect(segs1[2].text.endsWith('。'), isTrue);
+
+    // 英文逗号同理。
+    await deps.streamingService.speak('Hello, world, bye.');
+    final segs2 = deps.streamingService.segments;
+    expect(segs2, hasLength(3), reason: '应按英文逗号切成 3 块');
+    expect(segs2[0].text.trim(), 'Hello,');
+
+    await deps.streamingService.disposeAll();
+    tempDir.deleteSync(recursive: true);
+  });
+
+  test('分块改进:句首引号保留 / 换行不产生空块 / ≤16词长句整句', () async {
+    SharedPreferences.setMockInitialValues({});
+    final tempDir = Directory.systemTemp.createTempSync('chunk_fix_');
+
+    final deps = AppDependencies(
+      engine: FakeTtsEngine(segmentDuration: Duration.zero),
+      downloader: FakeModelDownloader(),
+      chunker: TextChunker(enableJieba: false),
+      extractor: const ArchiveExtractor(useCompute: false),
+      player: FakeAudioPlaybackQueue(),
+      modelsDirProvider: () async => Directory('${tempDir.path}/models'),
+      audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    );
+    await deps.init();
+    final model = ModelCatalog.all.first;
+    await deps.modelManager.downloadModel(model);
+    await deps.settings.selectModel(model.id);
+
+    // 句首引号保留 + 段落换行合并(不产生空块)。
+    await deps.streamingService.speak('“用新技术改造提升传统产业”。\n\n第二段,继续。');
+    final s1 = deps.streamingService.segments;
+    expect(s1.first.text.startsWith('“用'), isTrue, reason: '首块应保留句首引号');
+    expect(s1.any((s) => s.text.trim().isEmpty), isFalse,
+        reason: '段落换行应并入前块,不产生空块');
+    expect(s1.map((s) => s.text).join(),
+        deps.streamingService.normalization!.text,
+        reason: '段应完整覆盖原文');
+
+    // 后续句 11 词(≤16)应整句一块,不再切成 10+1。
+    await deps.streamingService.speak('你好。a b c d e f g h i j k,继续。');
+    final s2 = deps.streamingService.segments;
+    final longClause =
+        s2.where((s) => s.text.trim().startsWith('a ')).toList();
+    expect(longClause, hasLength(1), reason: '11 词后续句应整句一块');
+    expect(longClause.first.text.trim(), 'a b c d e f g h i j k,');
+
+    await deps.streamingService.disposeAll();
+    tempDir.deleteSync(recursive: true);
+  });
+
   test('历史恢复的气泡(segments 为空)重读时重新分块并播放', () async {
     SharedPreferences.setMockInitialValues({});
     final tempDir = Directory.systemTemp.createTempSync('history_replay_');

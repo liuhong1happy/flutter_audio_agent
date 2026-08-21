@@ -166,8 +166,8 @@ class TextChunker {
     }
   }
 
-  /// 句子结束标点(含换行)。
-  static const String _sentenceBreaks = '。！？；;.!?…\n';
+  /// 分句边界标点:句末标点 + 换行 + **中英文逗号**(逗号是自然短语边界)。
+  static const String _sentenceBreaks = '。！？；;.!?…\n，,';
 
   static bool _isSentenceBreak(String ch) => _sentenceBreaks.contains(ch);
 

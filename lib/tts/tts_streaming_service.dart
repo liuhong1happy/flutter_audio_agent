@@ -38,6 +38,11 @@ enum StreamingPhase {
 }
 
 class TtsStreamingService extends ChangeNotifier {
+  /// 后续句"整句一块"的词汇量上限:超过才按 10 词兜底切分。
+  /// 阈值定得比首句渐进(10)稍大,让多数带顿号/长修饰语的中文句
+  /// 保持整句(内部由 sherpa 自然停顿),避免 10 词硬切把短语断开。
+  static const int _maxWholeChunkWords = 16;
+
   TtsStreamingService({
     required TextNormalizer normalizer,
     required TextChunker chunker,
@@ -104,14 +109,18 @@ class TtsStreamingService extends ChangeNotifier {
   /// - **首句** 按 `1 + 4 + 10 + … + 剩余` 渐进分组:首词尽快出声,
   ///   又不至于像 1+2+4 那样割裂。
   /// - **后续句子** 整句一块(顺滑、自然);超长句(>10 词)按 10 词切分。
-  /// - 先按句末标点切句,避免长句/跨句切块。
+  /// - 先按句末标点与**逗号**(中英文)切句,使每一块落在自然短语边界上
+  ///   (合成/高亮更贴合语感),避免跨逗号硬切。
+  /// - 纯标点/空白的"句子"(如段落换行)并入前一块,避免产生空块。
+  /// - 后续句 ≤16 词整句一块;更长的才按 10 词兜底切分,避免无谓的
+  ///   短语硬切(顿号 `、` 不算边界,避免过度碎片化)。
   List<_ProgressiveChunk> _buildProgressiveChunks(
     List<WordSpan> allWords,
     String text,
   ) {
-    const breakChars = '。！？；;.!?…\n';
+    const breakChars = '。！？；;.!?…\n，,';
 
-    // 1. 按标点切句。
+    // 1. 按标点切句(含逗号)。
     final sentences = <(int, int)>[];
     var sentStart = 0;
     for (var i = 0; i < text.length; i++) {
@@ -132,6 +141,37 @@ class TtsStreamingService extends ChangeNotifier {
           .toList();
       final real = senWords.where((w) => !w.isSeparator).toList();
       if (real.isEmpty) {
+        // 无实词的"句子"(通常是段落换行/连续标点):并入前一块,避免空块。
+        final sep = text.substring(senStart, senEnd);
+        if (chunks.isNotEmpty) {
+          final last = chunks.removeLast();
+          chunks.add(_ProgressiveChunk(
+            segment: TtsSegment(
+              text: last.segment.text + sep,
+              start: last.segment.start,
+              end: senEnd,
+            ),
+            words: last.words,
+          ));
+        } else {
+          chunks.add(_ProgressiveChunk(
+            segment: TtsSegment(
+              text: sep,
+              start: senStart,
+              end: senEnd,
+            ),
+            words: senWords,
+          ));
+        }
+        continue;
+      }
+
+      if (si == 0) {
+        // 首句:1 + 4 + 10 + … + 剩余。
+        _addPatternChunks(
+            chunks, text, real, senWords, senStart, senEnd, const [1, 4, 10]);
+      } else if (real.length <= _maxWholeChunkWords) {
+        // 后续句:整句一块(从句首起,保留句首空白/引号)。
         chunks.add(_ProgressiveChunk(
           segment: TtsSegment(
             text: text.substring(senStart, senEnd),
@@ -140,36 +180,25 @@ class TtsStreamingService extends ChangeNotifier {
           ),
           words: senWords,
         ));
-        continue;
-      }
-
-      if (si == 0) {
-        // 首句:1 + 4 + 10 + … + 剩余。
-        _addPatternChunks(chunks, text, real, senWords, senEnd, const [1, 4, 10]);
-      } else if (real.length <= 10) {
-        // 后续句:整句一块。
-        chunks.add(_ProgressiveChunk(
-          segment: TtsSegment(
-            text: text.substring(real.first.start, senEnd),
-            start: real.first.start,
-            end: senEnd,
-          ),
-          words: senWords,
-        ));
       } else {
-        // 长句(>10 词):按 10 词切分,末块为剩余。
-        _addPatternChunks(chunks, text, real, senWords, senEnd, const [10]);
+        // 超长句(>16 词):按 10 词兜底切分,末块为剩余。
+        _addPatternChunks(
+            chunks, text, real, senWords, senStart, senEnd, const [10]);
       }
     }
     return chunks;
   }
 
   /// 在句内按 [pattern] 尺寸渐进分组(循环使用,末块为剩余)。
+  ///
+  /// 首块从句首 [senStart] 起,保留句首引号/空白,保证各段拼接回原文;
+  /// 后续块从下一词边界起。
   void _addPatternChunks(
     List<_ProgressiveChunk> out,
     String text,
     List<WordSpan> real,
     List<WordSpan> senWords,
+    int senStart,
     int senEnd,
     List<int> pattern,
   ) {
@@ -179,15 +208,16 @@ class TtsStreamingService extends ChangeNotifier {
       final size = pattern[pi < pattern.length ? pi : pattern.length - 1];
       final group = real.skip(idx).take(size).toList();
       final first = group.first;
+      final start = idx == 0 ? senStart : first.start;
       final end = idx + size >= real.length ? senEnd : real[idx + size].start;
       out.add(_ProgressiveChunk(
         segment: TtsSegment(
-          text: text.substring(first.start, end),
-          start: first.start,
+          text: text.substring(start, end),
+          start: start,
           end: end,
         ),
         words: senWords
-            .where((w) => w.start >= first.start && w.end <= end)
+            .where((w) => w.start >= start && w.end <= end)
             .toList(),
       ));
       idx += size;
