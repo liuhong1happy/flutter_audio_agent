@@ -41,7 +41,8 @@ class TtsStreamingService extends ChangeNotifier {
   /// 后续句"整句一块"的词汇量上限:超过才按 10 词兜底切分。
   /// 阈值定得比首句渐进(10)稍大,让多数带顿号/长修饰语的中文句
   /// 保持整句(内部由 sherpa 自然停顿),避免 10 词硬切把短语断开。
-  static const int _maxWholeChunkWords = 16;
+  /// 文章级长句通常 ≤20 词,此阈值可让它们保持整句、顺滑自然。
+  static const int _maxWholeChunkWords = 20;
 
   TtsStreamingService({
     required TextNormalizer normalizer,

@@ -202,7 +202,7 @@ void main() {
     tempDir.deleteSync(recursive: true);
   });
 
-  test('分块改进:句首引号保留 / 换行不产生空块 / ≤16词长句整句', () async {
+  test('分块改进:句首引号保留 / 换行不产生空块 / ≤20词长句整句', () async {
     SharedPreferences.setMockInitialValues({});
     final tempDir = Directory.systemTemp.createTempSync('chunk_fix_');
 
