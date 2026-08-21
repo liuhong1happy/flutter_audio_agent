@@ -39,12 +39,18 @@ class TextNormalizer {
 
   static const String _digitChars = '零一二三四五六七八九';
 
-  static final RegExp _yearRe = RegExp(r'(\d{4})(?=年)');
+  static final RegExp _yearRe = RegExp(r'(\d{4})\s*(?=年)');
+  static final RegExp _yearRangeRe = RegExp(r'(\d{4})-(\d{4})');
   static final RegExp _dateRe = RegExp(r'(\d{4})-(\d{1,2})-(\d{1,2})');
+  // 版本号:至少两个小数点(2.7.1),避免误伤小数(3.5)与百分比(3.5%)。
+  static final RegExp _versionRe = RegExp(r'(\d+(?:\.\d+){2,})');
   static final RegExp _percentRe = RegExp(r'(\d+(?:\.\d+)?)%');
   static final RegExp _phoneContextRe = RegExp(
       r'(电话|拨打|手机|号码|请拨|拨|打给|打)\s*(\d{3,})');
-  static final RegExp _numberRe = RegExp(r'(-?\d+(?:\.\d+)?)');
+  static final RegExp _barePhoneRe = RegExp(r'(\d{3})-(\d{4})-(\d{4})');
+  // 支持"空格分隔的数字组"(如 186 420、¥2 389 600.50),空格/不间断空格。
+  static final RegExp _numberRe =
+      RegExp(r'(-?\d+(?:[  ]\d+)*(?:\.\d+)?)');
   static final RegExp _timeRe = RegExp(r'(\d{1,2}):(\d{2})');
 
   /// 全角字符 → 半角(数字/标点)。
@@ -62,6 +68,15 @@ class TextNormalizer {
     final code = ch.codeUnitAt(0);
     return (code >= 0x4E00 && code <= 0x9FFF) ||
         (code >= 0x3400 && code <= 0x4DBF);
+  }
+
+  /// [from] 之后第一个非空白字符是否为 CJK(用于判断"数字后是否跟单位")。
+  static bool _nextCjk(String src, int from) {
+    var j = from;
+    while (j < src.length && (src[j] == ' ' || src[j] == ' ')) {
+      j++;
+    }
+    return j < src.length && _isCjk(src[j]);
   }
 
   NormalizationResult normalize(String input) {
@@ -117,7 +132,7 @@ class TextNormalizer {
       );
     }
 
-    // 1. 年份:2024年 → 二零二四年
+    // 1. 年份:2024年 → 二零二四年(容忍 `2024 年` 中间空格)
     final year = _yearRe.matchAsPrefix(src, i);
     if (year != null) {
       final digits = year.group(1)!;
@@ -125,6 +140,32 @@ class TextNormalizer {
         text: _digitByDigit(digits),
         sourceIndex: i,
         end: year.end,
+      );
+    }
+
+    // 1a. 年份区间:2023-2026 → 二零二三至二零二六
+    final yearRange = _yearRangeRe.matchAsPrefix(src, i);
+    if (yearRange != null) {
+      return _Match(
+        text: '${_digitByDigit(yearRange.group(1)!)}至'
+            '${_digitByDigit(yearRange.group(2)!)}',
+        sourceIndex: i,
+        end: yearRange.end,
+      );
+    }
+
+    // 1b. 版本号:2.7.1 → 二点七点一(两个以上小数点,避免误伤小数)
+    final version = _versionRe.matchAsPrefix(src, i);
+    if (version != null) {
+      final parts = version
+          .group(1)!
+          .split('.')
+          .map((p) => _toChineseNumber(p))
+          .join('点');
+      return _Match(
+        text: parts,
+        sourceIndex: i,
+        end: version.end,
       );
     }
 
@@ -151,6 +192,19 @@ class TextNormalizer {
       );
     }
 
+    // 3b. 裸电话:138-1234-5678 → 一三八一二三四五六七八(逐位,3-4-4 分组)
+    final barePhone = _barePhoneRe.matchAsPrefix(src, i);
+    if (barePhone != null) {
+      final digits = barePhone.group(1)! +
+          barePhone.group(2)! +
+          barePhone.group(3)!;
+      return _Match(
+        text: _digitByDigit(digits),
+        sourceIndex: i,
+        end: barePhone.end,
+      );
+    }
+
     // 4. 时间:12:35 → 十二点三十五分(分钟为两位,避免误伤 16:9 比值)
     final time = _timeRe.matchAsPrefix(src, i);
     if (time != null) {
@@ -173,7 +227,8 @@ class TextNormalizer {
   }
 
   _Match? _matchNumber(String src, Match m) {
-    final raw = m.group(1)!;
+    // 去掉空格分隔的数字组(如 186 420、¥2 389 600.50)。
+    final raw = m.group(1)!.replaceAll(RegExp(r'[  ]'), '');
     final hasMinus = raw.startsWith('-');
     // 只有"真正的负号"(句首/空白/括号后)才读"负";
     // 连接号(苏-27)不读负,直接去掉。
@@ -189,8 +244,8 @@ class TextNormalizer {
 
     final len = unsigned.length;
 
-    // 下一个字符是 CJK(单位/名词)→ 数量读法。
-    if (m.end < src.length && _isCjk(src[m.end])) {
+    // 下一个非空白字符是 CJK(单位/名词)→ 数量读法(容忍 `186 420 行` 的空格)。
+    if (_nextCjk(src, m.end)) {
       final text = sign + _toChineseNumber(unsigned);
       return _Match(text: text, sourceIndex: m.start, end: m.end);
     }
