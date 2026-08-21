@@ -33,9 +33,9 @@ class TtsSegment {
 /// 一次输入(一条气泡)的完整记录。
 ///
 /// 气泡 = 用户一次输入的**整段文本**,而不是逐句。合成时按句分块,
-/// 但展示上是一条气泡,内部做逐词高亮。
+/// 但展示上是一条气泡,内部做逐词高亮。附处理耗时统计供气泡展示。
 class Utterance {
-  const Utterance({
+  Utterance({
     required this.originalText,
     required this.normalizedText,
     required this.segments,
@@ -61,6 +61,50 @@ class Utterance {
 
   /// 归一化结果(原文视图回映射用)。
   final NormalizationResult? normalization;
+
+  /// 处理耗时统计(合成过程中由服务填充)。
+  final UtteranceStats stats = UtteranceStats();
+}
+
+/// 一次输入的处理耗时统计。
+class UtteranceStats {
+  /// 分词/分句处理时间。
+  Duration tokenizeTime = Duration.zero;
+
+  /// 首词音频返回时间(speak 开始 → 首个音频就绪)。
+  Duration firstAudioLatency = Duration.zero;
+
+  /// 文本 → 音频总合成时长(全部块合成完成)。
+  Duration synthesisTotal = Duration.zero;
+
+  /// 音频总播放时长(所有块音频时长之和)。
+  Duration audioDuration = Duration.zero;
+
+  /// 总处理时长 = 分词处理时间 + 文本转音频总时长。
+  Duration get processingTotal => tokenizeTime + synthesisTotal;
+
+  /// 是否已有统计。
+  bool get hasData => tokenizeTime > Duration.zero || synthesisTotal > Duration.zero;
+
+  /// 持久化用:统一毫秒级整数,避免浮点精度丢失。
+  Map<String, int> toJson() => <String, int>{
+        'tokenizeMs': tokenizeTime.inMilliseconds,
+        'firstAudioMs': firstAudioLatency.inMilliseconds,
+        'synthesisMs': synthesisTotal.inMilliseconds,
+        'audioMs': audioDuration.inMilliseconds,
+      };
+
+  /// 从毫秒级数据恢复。
+  void fromJson(Map<String, dynamic> json) {
+    tokenizeTime =
+        Duration(milliseconds: (json['tokenizeMs'] as num?)?.toInt() ?? 0);
+    firstAudioLatency =
+        Duration(milliseconds: (json['firstAudioMs'] as num?)?.toInt() ?? 0);
+    synthesisTotal =
+        Duration(milliseconds: (json['synthesisMs'] as num?)?.toInt() ?? 0);
+    audioDuration =
+        Duration(milliseconds: (json['audioMs'] as num?)?.toInt() ?? 0);
+  }
 }
 
 /// 片段内的一个词(用于逐词高亮)。
@@ -187,11 +231,13 @@ class TextChunker {
             ));
           }
           final token = m.group(0)!;
+          // 仅字母/数字串算"词";标点等其他字符为分隔符(weight 0,不高亮)。
+          final isWord = RegExp(r'^[A-Za-z0-9]+$').hasMatch(token);
           words.add(WordSpan(
             text: token,
             start: runStart + m.start,
             end: runStart + m.end,
-            weight: token.length,
+            weight: isWord ? token.length : 0,
           ));
           lastEnd = m.end;
         }

@@ -8,9 +8,12 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dva/flutter_dva.dart';
 
 import '../data/model_catalog.dart';
 import '../data/model_manager.dart';
+import '../dva/app_dva.dart';
+import '../dva/app_models.dart';
 import '../models/tts_settings.dart';
 import 'sequential_audio_player.dart';
 import 'text_chunker.dart';
@@ -98,6 +101,74 @@ class TtsStreamingService extends ChangeNotifier {
       count += _segmentWords[s].where((w) => !w.isSeparator).length;
     }
     return count + segWordIndex;
+  }
+
+  /// 渐进分块:先按句末标点切句(避免长句/跨句切块),每句内再
+  /// 按 1 + 2 + 4 + 4 + … + 剩余 渐进分组。
+  ///
+  /// 首块只含 1 个词 → 合成极快,首个音频尽早播放;后续块逐级放宽。
+  /// 每块文本 = 从块首词到下一块首词之间的子串(保留标点/停顿)。
+  List<_ProgressiveChunk> _buildProgressiveChunks(
+    List<WordSpan> allWords,
+    String text,
+  ) {
+    const breakChars = '。！？；;.!?…\n';
+    const pattern = [1, 2, 4];
+
+    // 1. 按标点切句。
+    final sentences = <(int, int)>[];
+    var sentStart = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (breakChars.contains(text[i])) {
+        sentences.add((sentStart, i + 1));
+        sentStart = i + 1;
+      }
+    }
+    if (sentStart < text.length) sentences.add((sentStart, text.length));
+    if (sentences.isEmpty) sentences.add((0, text.length));
+
+    // 2. 每句内渐进分组。
+    final chunks = <_ProgressiveChunk>[];
+    for (final (senStart, senEnd) in sentences) {
+      final senWords = allWords
+          .where((w) => w.start >= senStart && w.end <= senEnd)
+          .toList();
+      final real = senWords.where((w) => !w.isSeparator).toList();
+      if (real.isEmpty) {
+        chunks.add(_ProgressiveChunk(
+          segment: TtsSegment(
+            text: text.substring(senStart, senEnd),
+            start: senStart,
+            end: senEnd,
+          ),
+          words: senWords,
+        ));
+        continue;
+      }
+      var idx = 0;
+      var pi = 0;
+      while (idx < real.length) {
+        final size = pattern[pi < pattern.length ? pi : pattern.length - 1];
+        final group = real.skip(idx).take(size).toList();
+        final first = group.first;
+        final end = idx + size >= real.length
+            ? senEnd
+            : real[idx + size].start;
+        chunks.add(_ProgressiveChunk(
+          segment: TtsSegment(
+            text: text.substring(first.start, end),
+            start: first.start,
+            end: end,
+          ),
+          words: senWords
+              .where((w) => w.start >= first.start && w.end <= end)
+              .toList(),
+        ));
+        idx += size;
+        pi++;
+      }
+    }
+    return chunks;
   }
 
   void _stopWordTracking() {
@@ -201,6 +272,7 @@ class TtsStreamingService extends ChangeNotifier {
     _phase = StreamingPhase.preparing;
     _cancelled = false;
     final session = ++_session;
+    final speakWatch = Stopwatch()..start();
     notifyListeners();
 
     try {
@@ -208,26 +280,16 @@ class TtsStreamingService extends ChangeNotifier {
       final norm = _normalizer.normalize(trimmed);
       _normalization = norm;
 
-      // 2. 分句/分词;一条输入 = 一条气泡(整段文本)。
+      // 2. 词级切分 + 渐进分块(1+2+4+…):首词尽快出声,后逐步放宽粒度。
       await _chunker.ensureInitialized();
-      _segments = _chunker.chunk(norm.text);
+      final flatWords = _chunker.splitWords(norm.text);
+      final chunks = _buildProgressiveChunks(flatWords, norm.text);
+      _segments = chunks.map((c) => c.segment).toList();
+      _segmentWords = chunks.map((c) => c.words).toList();
       if (_segments.isEmpty) {
         throw StateError('没有可合成的文本');
       }
-      _segmentWords = _segments
-          .map((s) => _chunker.splitWords(s.text))
-          .toList();
-      final allWords = <WordSpan>[];
-      for (var s = 0; s < _segments.length; s++) {
-        for (final w in _segmentWords[s]) {
-          allWords.add(WordSpan(
-            text: w.text,
-            start: _segments[s].start + w.start,
-            end: _segments[s].start + w.end,
-            weight: w.weight,
-          ));
-        }
-      }
+      final allWords = flatWords;
       _utterances.add(Utterance(
         originalText: trimmed,
         normalizedText: norm.text,
@@ -237,6 +299,7 @@ class TtsStreamingService extends ChangeNotifier {
         normalization: norm,
       ));
       _activeIndex = _utterances.length - 1;
+      _utterances.last.stats.tokenizeTime = speakWatch.elapsed;
       _segmentDurations.clear();
       _stopWordTracking();
 
@@ -264,7 +327,13 @@ class TtsStreamingService extends ChangeNotifier {
       _segmentWavs.clear();
       notifyListeners();
 
-      await _synthesizeSegments(session);
+      await _synthesizeSegments(
+        session,
+        speakWatch: speakWatch,
+        utterance: _utterances.last,
+      );
+      await _persistHistory();
+      notifyListeners(); // 刷新气泡耗时统计。
     } catch (e) {
       _lastError = '$e';
       _phase = StreamingPhase.error;
@@ -273,7 +342,16 @@ class TtsStreamingService extends ChangeNotifier {
   }
 
   /// 逐句合成并顺序入队(返回 true = 正常完成,false = 中途出错/被取消)。
-  Future<bool> _synthesizeSegments(int session) async {
+  ///
+  /// [speakWatch] 从本次朗读开始计时;[utterance] 用于写入耗时统计。
+  Future<bool> _synthesizeSegments(
+    int session, {
+    required Stopwatch speakWatch,
+    Utterance? utterance,
+  }) async {
+    final synthWatch = Stopwatch()..start();
+    var firstAudioSet = false;
+
     for (var i = 0; i < _segments.length; i++) {
       if (session != _session || _cancelled) break;
       final seg = _segments[i];
@@ -284,6 +362,11 @@ class TtsStreamingService extends ChangeNotifier {
           speed: _settings.speed,
         );
         if (session != _session || _cancelled) break;
+        // 首词音频就绪时间。
+        if (!firstAudioSet) {
+          firstAudioSet = true;
+          utterance?.stats.firstAudioLatency = speakWatch.elapsed;
+        }
         _segmentDurations[i] = audio.sampleRate > 0
             ? audio.samples.length / audio.sampleRate
             : 0;
@@ -297,6 +380,16 @@ class TtsStreamingService extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+    }
+
+    // 汇总耗时统计。
+    if (utterance != null) {
+      utterance.stats.synthesisTotal = synthWatch.elapsed;
+      var totalMs = 0;
+      for (final d in _segmentDurations.values) {
+        totalMs += (d * 1000).round();
+      }
+      utterance.stats.audioDuration = Duration(milliseconds: totalMs);
     }
     return true;
   }
@@ -325,7 +418,13 @@ class TtsStreamingService extends ChangeNotifier {
 
     final session = _session;
     _cancelled = false;
-    await _synthesizeSegments(session);
+    await _synthesizeSegments(
+      session,
+      speakWatch: Stopwatch()..start(),
+      utterance: u,
+    );
+    await _persistHistory();
+    notifyListeners();
   }
 
   /// 暂停朗读(仅播放中/合成中可暂停)。
@@ -411,4 +510,52 @@ class TtsStreamingService extends ChangeNotifier {
     await _player.dispose();
     _engine.dispose();
   }
+
+  /// 从 flutter_dva 恢复气泡历史(轻量:原文/归一化/毫秒耗时)。
+  Future<void> loadHistory() async {
+    final store = dvaStore();
+    if (store == null) return;
+    final h = store.getStateByKey<HistoryState>('history');
+    _utterances.clear();
+    for (final item in h.items) {
+      final original = item['original'] as String? ?? '';
+      final u = Utterance(
+        originalText: original,
+        normalizedText:
+            item['normalized'] as String? ?? original,
+        segments: const [],
+        segmentWords: const [],
+        allWords: const [],
+      );
+      u.stats.fromJson(
+        Map<String, dynamic>.from(item['stats'] as Map? ?? const {}),
+      );
+      _utterances.add(u);
+    }
+    _activeIndex = -1;
+    notifyListeners();
+  }
+
+  /// 把气泡历史写入 flutter_dva 持久化(耗时统一毫秒整数)。
+  Future<void> _persistHistory() async {
+    final store = dvaStore();
+    if (store == null) return;
+    await store.dispatch(
+      DvaAction('history/setItems', _utterances.map((u) {
+        return <String, dynamic>{
+          'original': u.originalText,
+          'normalized': u.normalizedText,
+          'stats': u.stats.toJson(),
+        };
+      }).toList()),
+    );
+  }
+}
+
+/// 一个渐进分块:待合成文本段 + 段内词(含分隔符)。
+class _ProgressiveChunk {
+  const _ProgressiveChunk({required this.segment, required this.words});
+
+  final TtsSegment segment;
+  final List<WordSpan> words;
 }

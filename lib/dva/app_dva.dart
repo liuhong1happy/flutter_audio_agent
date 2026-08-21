@@ -14,10 +14,12 @@ Dva dva = Dva(DvaOpts(
   initialState: <String, StoreOfState<dynamic>>{
     'settings': StoreOfState<SettingsState>(state: SettingsState()),
     'downloads': StoreOfState<DownloadsState>(state: DownloadsState()),
+    'history': StoreOfState<HistoryState>(state: HistoryState()),
   },
   models: <Model<dynamic>>[
     SettingsModel(),
     DownloadsModel(),
+    HistoryModel(),
   ],
 ));
 

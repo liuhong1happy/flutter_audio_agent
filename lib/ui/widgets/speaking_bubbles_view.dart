@@ -98,6 +98,7 @@ class _SpeakingBubblesViewState extends State<SpeakingBubblesView> {
           useWordHighlight: isActive && u.allWords.isNotEmpty,
           currentWordIndex: isActive ? widget.currentWordIndex : -1,
           isActive: isActive,
+          stats: u.stats,
           onTap: widget.onReplay == null ? null : () => widget.onReplay!(i),
         );
       },
@@ -112,6 +113,7 @@ class _Bubble extends StatelessWidget {
     required this.useWordHighlight,
     required this.currentWordIndex,
     required this.isActive,
+    this.stats,
     this.onTap,
   });
 
@@ -120,7 +122,24 @@ class _Bubble extends StatelessWidget {
   final bool useWordHighlight;
   final int currentWordIndex;
   final bool isActive;
+  final UtteranceStats? stats;
   final VoidCallback? onTap;
+
+  /// 按秒显示,秒后最多 3 位小数(去掉末尾 0)。
+  static String _fmt(Duration d) {
+    var s = (d.inMicroseconds / Duration.microsecondsPerSecond)
+        .toStringAsFixed(3);
+    s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return '${s}s';
+  }
+
+  String get _statsLine {
+    final s = stats;
+    if (s == null || !s.hasData) return '';
+    return '分词 ${_fmt(s.tokenizeTime)} · 首词 ${_fmt(s.firstAudioLatency)}'
+        ' · 合成 ${_fmt(s.synthesisTotal)} · 播放 ${_fmt(s.audioDuration)}'
+        ' · 总 ${_fmt(s.processingTotal)}';
+  }
 
   List<TextSpan> _buildSpans() {
     final spans = <TextSpan>[];
@@ -194,22 +213,41 @@ class _Bubble extends StatelessWidget {
                 : null,
             boxShadow: isActive ? AppShadow.e1 : null,
           ),
-          child: Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Flexible(
-                child: Text.rich(
-                  TextSpan(children: _buildSpans()),
-                  style: AppText.body,
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Text.rich(
+                      TextSpan(children: _buildSpans()),
+                      style: AppText.body,
+                    ),
+                  ),
+                  if (onTap != null) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Icon(
+                      Icons.replay_outlined,
+                      size: 16,
+                      color: isActive
+                          ? AppColors.accent
+                          : AppColors.inkTertiary,
+                    ),
+                  ],
+                ],
               ),
-              if (onTap != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                Icon(
-                  Icons.replay_outlined,
-                  size: 16,
-                  color: isActive ? AppColors.accent : AppColors.inkTertiary,
+              // 气泡下方:处理耗时统计,供使用者参考。
+              if (_statsLine.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  _statsLine,
+                  style: AppText.caption.copyWith(
+                    color: AppColors.inkTertiary,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ],

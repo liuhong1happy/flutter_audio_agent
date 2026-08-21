@@ -80,5 +80,7 @@ class AppDependencies {
       settings: settings,
       player: _player,
     );
+    // 恢复持久化的气泡历史(含毫秒级耗时统计)。
+    await streamingService.loadHistory();
   }
 }

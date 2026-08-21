@@ -127,3 +127,41 @@ class DownloadsModel extends Model<DownloadsState> {
     effects = {};
   }
 }
+
+/// 聊天气泡历史(轻量):每条记录原始文本/归一化文本/毫秒级耗时统计。
+///
+/// 用于 App 重启后恢复气泡与耗时展示。
+class HistoryState extends DvaState {
+  List<Map<String, dynamic>> items = [];
+
+  @override
+  void fromJson(Map<String, dynamic> json) {
+    items = (json['items'] as List<dynamic>?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+  }
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{'items': items};
+}
+
+/// history 模型。
+class HistoryModel extends Model<HistoryState> {
+  HistoryModel() {
+    namespace = 'history';
+    state = StoreOfState<HistoryState>(state: HistoryState());
+    reducers = {
+      'setItems': (s, a) {
+        final st = s.getState() as HistoryState;
+        st.items = (a.payload as List<dynamic>?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ??
+            [];
+        s.setState(st);
+        return s;
+      },
+    };
+    effects = {};
+  }
+}
