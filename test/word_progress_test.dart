@@ -230,6 +230,16 @@ void main() {
         deps.streamingService.normalization!.text,
         reason: '段应完整覆盖原文');
 
+    // 年月日整块:日期不被首句渐进拆散。
+    await deps.streamingService.speak('2026 年 08 月 21 日,实验室完成版本迭代。');
+    final sDate = deps.streamingService.segments;
+    expect(sDate.first.text.contains('年') && sDate.first.text.contains('月') &&
+            sDate.first.text.contains('日'),
+        isTrue,
+        reason: '年月日应在一个块内');
+    expect(sDate.map((s) => s.text).join(),
+        deps.streamingService.normalization!.text);
+
     // 后续句 11 词(≤16)应整句一块,不再切成 10+1。
     await deps.streamingService.speak('你好。a b c d e f g h i j k,继续。');
     final s2 = deps.streamingService.segments;

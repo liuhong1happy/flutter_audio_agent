@@ -92,6 +92,10 @@ void main() {
       expect(n.normalize('2023-2026').text, '二零二三至二零二六');
     });
 
+    test('空格分隔年月日读作整日期(2026 年 08 月 21 日)', () {
+      expect(n.normalize('2026 年 08 月 21 日').text, '二零二六年八月二十一日');
+    });
+
     test('裸电话 3-4-4 逐位读;版本号按点读;百分比不被版本规则误吞', () {
       expect(n.normalize('138-1234-5678').text, '一三八一二三四五六七八');
       expect(n.normalize('V2.7.1').text, 'V二点七点一');

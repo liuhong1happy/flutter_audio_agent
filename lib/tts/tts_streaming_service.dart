@@ -194,6 +194,8 @@ class TtsStreamingService extends ChangeNotifier {
   ///
   /// 首块从句首 [senStart] 起,保留句首引号/空白,保证各段拼接回原文;
   /// 后续块从下一词边界起。
+  /// **年月日不可切**:切点若落在 `X年Y月Z日` 内部,自动延后到日期结束,
+  /// 让日期整块合成朗读。
   void _addPatternChunks(
     List<_ProgressiveChunk> out,
     String text,
@@ -203,14 +205,25 @@ class TtsStreamingService extends ChangeNotifier {
     int senEnd,
     List<int> pattern,
   ) {
+    final dateSpans = _dateSpansIn(text, senStart, senEnd);
     var idx = 0;
     var pi = 0;
     while (idx < real.length) {
       final size = pattern[pi < pattern.length ? pi : pattern.length - 1];
-      final group = real.skip(idx).take(size).toList();
-      final first = group.first;
-      final start = idx == 0 ? senStart : first.start;
-      final end = idx + size >= real.length ? senEnd : real[idx + size].start;
+      var end = idx + size >= real.length ? senEnd : real[idx + size].start;
+      // 切点在日期内 → 延后到日期结束(整块)。
+      for (final (ds, de) in dateSpans) {
+        if (end > ds && end < de) {
+          end = de;
+          break;
+        }
+      }
+      final start = idx == 0 ? senStart : real[idx].start;
+      // 本块实际包含的词数(可能因日期延后而 > size)。
+      var consumed = size;
+      while (idx + consumed < real.length && real[idx + consumed].start < end) {
+        consumed++;
+      }
       out.add(_ProgressiveChunk(
         segment: TtsSegment(
           text: text.substring(start, end),
@@ -221,9 +234,22 @@ class TtsStreamingService extends ChangeNotifier {
             .where((w) => w.start >= start && w.end <= end)
             .toList(),
       ));
-      idx += size;
+      idx += consumed;
       pi++;
     }
+  }
+
+  /// 找出 [from,to) 内的"年月日"区间(归一化文本中 `X年Y月Z日`,X/Y/Z 为汉字数字)。
+  static List<(int, int)> _dateSpansIn(String text, int from, int to) {
+    const digit = r'[〇零一二三四五六七八九十百千]';
+    final re = RegExp('$digit+年$digit+月$digit+日');
+    final spans = <(int, int)>[];
+    for (final m in re.allMatches(text, from)) {
+      if (m.start >= from && m.end <= to) {
+        spans.add((m.start, m.end));
+      }
+    }
+    return spans;
   }
 
   void _stopWordTracking() {

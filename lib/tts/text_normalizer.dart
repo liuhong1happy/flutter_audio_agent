@@ -42,6 +42,9 @@ class TextNormalizer {
   static final RegExp _yearRe = RegExp(r'(\d{4})\s*(?=年)');
   static final RegExp _yearRangeRe = RegExp(r'(\d{4})-(\d{4})');
   static final RegExp _dateRe = RegExp(r'(\d{4})-(\d{1,2})-(\d{1,2})');
+  // 空格分隔的"年月日":2026 年 08 月 21 日 → 二零二六年八月二十一日
+  static final RegExp _dateWithUnitsRe =
+      RegExp(r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日');
   // 版本号:至少两个小数点(2.7.1),避免误伤小数(3.5)与百分比(3.5%)。
   static final RegExp _versionRe = RegExp(r'(\d+(?:\.\d+){2,})');
   static final RegExp _percentRe = RegExp(r'(\d+(?:\.\d+)?)%');
@@ -129,6 +132,20 @@ class TextNormalizer {
             '${_toChineseNumber('$d')}日',
         sourceIndex: i,
         end: date.end,
+      );
+    }
+
+    // 0b. 空格分隔年月日:2026 年 08 月 21 日 → 二零二六年八月二十一日
+    final dateUnits = _dateWithUnitsRe.matchAsPrefix(src, i);
+    if (dateUnits != null) {
+      final y = dateUnits.group(1)!;
+      final m = int.parse(dateUnits.group(2)!);
+      final d = int.parse(dateUnits.group(3)!);
+      return _Match(
+        text: '${_digitByDigit(y)}年${_toChineseNumber('$m')}月'
+            '${_toChineseNumber('$d')}日',
+        sourceIndex: i,
+        end: dateUnits.end,
       );
     }
 
