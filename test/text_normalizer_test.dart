@@ -63,4 +63,22 @@ void main() {
       expect(e, 7);
     });
   });
+
+  group('TextNormalizer 边界格式', () {
+    final n = TextNormalizer();
+
+    test('日期 YYYY-MM-DD 读作年月日', () {
+      expect(n.normalize('2026-09-06').text, '二零二六年九月六日');
+    });
+
+    test('连接号不读"负"(苏-27 / v1.10 的数字部分)', () {
+      expect(n.normalize('苏-27').text, '苏二十七');
+      expect(n.normalize('-5').text, '负五', reason: '真正的负号仍读"负"');
+    });
+
+    test('时间 12:35 读作几点几分;16:9 保持比值不误判', () {
+      expect(n.normalize('12:35').text, '十二点三十五分');
+      expect(n.normalize('16:9').text, '十六:九');
+    });
+  });
 }

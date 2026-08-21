@@ -40,10 +40,12 @@ class TextNormalizer {
   static const String _digitChars = '零一二三四五六七八九';
 
   static final RegExp _yearRe = RegExp(r'(\d{4})(?=年)');
+  static final RegExp _dateRe = RegExp(r'(\d{4})-(\d{1,2})-(\d{1,2})');
   static final RegExp _percentRe = RegExp(r'(\d+(?:\.\d+)?)%');
   static final RegExp _phoneContextRe = RegExp(
       r'(电话|拨打|手机|号码|请拨|拨|打给|打)\s*(\d{3,})');
   static final RegExp _numberRe = RegExp(r'(-?\d+(?:\.\d+)?)');
+  static final RegExp _timeRe = RegExp(r'(\d{1,2}):(\d{2})');
 
   /// 全角字符 → 半角(数字/标点)。
   static String _toHalfWidth(String ch) {
@@ -101,6 +103,20 @@ class TextNormalizer {
   }
 
   _Match? _matchAt(String src, int i) {
+    // 0. 日期:2026-09-06 → 二零二六年九月六日
+    final date = _dateRe.matchAsPrefix(src, i);
+    if (date != null) {
+      final y = date.group(1)!;
+      final m = int.parse(date.group(2)!);
+      final d = int.parse(date.group(3)!);
+      return _Match(
+        text: '${_digitByDigit(y)}年${_toChineseNumber('$m')}月'
+            '${_toChineseNumber('$d')}日',
+        sourceIndex: i,
+        end: date.end,
+      );
+    }
+
     // 1. 年份:2024年 → 二零二四年
     final year = _yearRe.matchAsPrefix(src, i);
     if (year != null) {
@@ -135,7 +151,19 @@ class TextNormalizer {
       );
     }
 
-    // 4. 一般数字
+    // 4. 时间:12:35 → 十二点三十五分(分钟为两位,避免误伤 16:9 比值)
+    final time = _timeRe.matchAsPrefix(src, i);
+    if (time != null) {
+      final h = int.parse(time.group(1)!);
+      final mi = int.parse(time.group(2)!);
+      return _Match(
+        text: '${_toChineseNumber('$h')}点${_toChineseNumber('$mi')}分',
+        sourceIndex: i,
+        end: time.end,
+      );
+    }
+
+    // 5. 一般数字
     final num = _numberRe.matchAsPrefix(src, i);
     if (num != null) {
       return _matchNumber(src, num);
@@ -146,12 +174,16 @@ class TextNormalizer {
 
   _Match? _matchNumber(String src, Match m) {
     final raw = m.group(1)!;
-    final isNegative = raw.startsWith('-');
-    final unsigned = isNegative ? raw.substring(1) : raw;
+    final hasMinus = raw.startsWith('-');
+    // 只有"真正的负号"(句首/空白/括号后)才读"负";
+    // 连接号(苏-27)不读负,直接去掉。
+    final isNegative = hasMinus && _isLeadingMinus(src, m.start);
+    final sign = isNegative ? '负' : '';
+    final unsigned = hasMinus ? raw.substring(1) : raw;
 
     // 小数:一律按数量读(十二点五)。
     if (unsigned.contains('.')) {
-      final text = (isNegative ? '负' : '') + _toChineseNumber(raw);
+      final text = sign + _toChineseNumber(unsigned);
       return _Match(text: text, sourceIndex: m.start, end: m.end);
     }
 
@@ -159,20 +191,33 @@ class TextNormalizer {
 
     // 下一个字符是 CJK(单位/名词)→ 数量读法。
     if (m.end < src.length && _isCjk(src[m.end])) {
-      final text = (isNegative ? '负' : '') + _toChineseNumber(unsigned);
+      final text = sign + _toChineseNumber(unsigned);
       return _Match(text: text, sourceIndex: m.start, end: m.end);
     }
 
     // 前导零或 >=5 位 → 逐位读(编码/号码)。
     final hasLeadingZero = len > 1 && unsigned.startsWith('0');
     if (hasLeadingZero || len >= 5) {
-      final text = (isNegative ? '负' : '') + _digitByDigit(unsigned);
+      final text = sign + _digitByDigit(unsigned);
       return _Match(text: text, sourceIndex: m.start, end: m.end);
     }
 
     // 普通数量。
-    final text = (isNegative ? '负' : '') + _toChineseNumber(unsigned);
+    final text = sign + _toChineseNumber(unsigned);
     return _Match(text: text, sourceIndex: m.start, end: m.end);
+  }
+
+  /// `-` 前一个字符是空白/开头/开括号 → 真正的负号;否则为连接号。
+  static bool _isLeadingMinus(String src, int start) {
+    if (start <= 0) return true;
+    final prev = src[start - 1];
+    return prev == ' ' ||
+        prev == '\t' ||
+        prev == '\n' ||
+        prev == '(' ||
+        prev == '（' ||
+        prev == '[' ||
+        prev == '【';
   }
 
   String _toChineseNumber(String numberStr) {
