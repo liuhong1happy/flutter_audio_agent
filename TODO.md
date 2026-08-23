@@ -14,8 +14,15 @@
 - **LLM = DeepSeek V4 Flash 在线版**(OpenAI 兼容 API,`chat/completions` 流式)。这是**唯一联网组件**;ASR/TTS/克隆/声纹/VAD 全部离线。
 - 平台 **Android 优先**(v1 只在 Android 验证;iOS 本期不做,但代码尽量平台无关)。
 - 对话页做**一键初始化**:未就绪时显示三件套(VAD/ASR/TTS)卡片,一键下载默认模型并自动配置。
-- 克隆与声纹为**配置型能力**,不对应独立底部 Tab;底部导航共 4 个 Tab(合成 / 模型 / 对话 / 设置)。
-- 说话人识别深度 = **个性化对话 + 按人记忆**:身份注入 LLM 提示词、每位说话人独立对话历史、未知说话人访客模式。**不做**按说话人换发音(超范围)。
+- 克隆与声纹为**配置型能力**,不对应独立底部 Tab;底部导航共 3 个 Tab(合成 / 对话 / 设置,模型下载并入设置页各分类子页)。
+- 说话人识别深度 = **个性化对话 + 按人记忆**:身份注入 LLM 提示词、未知说话人访客模式。**不做**按说话人换发音(超范围)。
+
+> **设计变更(2026-08-23,用户确认)**:
+> - 会话历史**不再按说话人分桶**,改为**单一时间线**(多说话人共一个会话),按时间排序;**存储从 flutter_dva/SharedPreferences 迁到 SQLite**(`sqflite`,`version`+`onUpgrade` 版本化迁移),支持分页。
+> - **对话双模式**:音频模式(语音→ASR→声纹→LLM→TTS 语音回复,仅显示最后一轮)与文本模式(打字→LLM 纯文本回复,不转 TTS,显示全部);Header 左侧历史、中间模式切换、右侧设置按钮。
+> - **设置页两级**:首页大类 ListItem → 子页配置 + 各自模型下载;底部 3 Tab(合成/对话/设置,移除「模型」Tab)。
+> - **LLM 多服务商**:OpenAI 兼容,内置 DeepSeek(`deepseek-v4-flash`/`deepseek-v4-pro`)/ Moonshot / 智谱 / 通义千问 + 自定义。
+> - **声纹注册改整页**(圆形居中录音按钮,支持连续注册多个说话人)。
 
 ---
 
@@ -150,7 +157,7 @@ vad.reset(); vad.flush(); vad.clear(); vad.free();
 
 ## 四、现有代码地图(复用点,勿重复造)
 
-- **入口**:`lib/main.dart` → `initDva` → `lib/app.dart`(`MaterialApp` + `MultiProvider` 暴露 settings/modelManager/streamingService)→ `lib/ui/main_shell.dart`(底部导航 + IndexedStack,3 Tab:合成/模型/设置;跨 Tab 用回调,**无命名路由**,仅 `model_manage_page` 弹窗用 `Navigator.pop`)。
+- **入口**:`lib/main.dart` → `initDva` → `lib/app.dart`(`MaterialApp` + `MultiProvider` 暴露 settings/modelManager/streamingService/克隆/声纹/对话)→ `lib/ui/main_shell.dart`(底部导航 + IndexedStack,3 Tab:合成/对话/设置;跨 Tab 用回调,子页用 `Navigator.push`)。
 - **DI**:`lib/app_dependencies.dart` — 手写单例 `AppDependencies`,构造可传 fakes(测试用),`init()` 幂等。新增服务在此接线 + 在 `app.dart` 的 MultiProvider 暴露。
 - **状态**:flutter_dva(持久化,`lib/dva/app_dva.dart` + `app_models.dart`,命名空间 settings/downloads/history,ReduxPersistor key 前缀 `perist:`)+ provider ChangeNotifier(运行时事实源)。
 - **TTS 引擎模板**:`lib/tts/tts_engine.dart` `SherpaTtsEngine` — `Isolate.spawn(_workerEntry)`、worker 内 `initBindings()`、load/generate 消息协议、`TransferableTypedData` 零拷贝。**新引擎照抄此模板**。
@@ -172,7 +179,7 @@ vad.reset(); vad.flush(); vad.clear(); vad.free();
 - `ModelFilesResolver.resolve` 按 `kind` 分支;`ResolvedModelPaths.isComplete` 按 kind:tts→model+tokens+(lexicon|dataDir);asr→model+tokens;speaker/vad→model;pocket→7 文件齐。
 - pocket 的 `encoder.onnx` 是 fp32,找文件时**勿用 int8 优先规则**;`vocab.json`/`token_scores.json` 精确名匹配。
 - `ModelManager.downloadModel` 按 `downloadFormat` 分支:`rawFile` 直接下载到 `modelUnpackedDir/rawFileName`,跳过 bzip2 校验与解压;完整性/体积校验照旧。`clearAllCaches` 一并清克隆音/声纹/对话缓存。
-- `tts_settings_page` 声音下拉过滤 `kind==tts`;`model_manage_page` 非 TTS 显示种类标签。
+- 设置页两级:语音合成子页下拉过滤 `kind==tts`;各分类子页显示各自模型下载(非 TTS 显示种类标签)。
 
 ### 5.2 隔离区引擎(各自独立、懒加载;不合并成单 worker,避免同时压住多模型)
 - 抽 `lib/tts/isolate_bridge.dart`:请求/应答(id 映射 + Completer)+ `TransferableTypedData` + 单向 fire-and-forget + worker→main 事件通道(VAD 用)。**重构 `SherpaTtsEngine` 复用**(风险低,有测试覆盖)。
@@ -212,15 +219,16 @@ enum ConversationPhase { idle, listening, asr, identifying, thinking, speaking, 
 `isReadyForConversation = vad已下载 && asr已下载 && 至少一个对话声音可用(TTS模型音已下载或存在克隆音)`。未就绪显示初始化卡片(三件套勾选 + 一键下载 + 进度 + 取消/重试);对 `kDefaultConversationModelIds` 中未下载项逐个 `ModelManager.downloadModel`(幂等);完成后自动 `setAsrModelId(paraformer)` + `setConversationVoice(model, piper)`(已有用户 TTS 选择则保留)。支持部分就绪增量。
 
 ### 5.6 UI
-- `main_shell.dart`:第 4 Tab「对话」(`IndexedStack` 插 `ConversationPage`;设置页索引 2→3;`SynthesizePage.onNavigateToSettings` 改 `_switchTo(3)`)。
-- `conversation_page.dart`:初始化卡片(未就绪)→ 状态胶囊 + 当前说话人胶囊 + 聊天气泡(用户徽章/流式助手文本)+ 开始/停止对话 + 静音开关 + 声音选择器(模型音+克隆音)+ 清空历史;AppBar 动作 `Navigator.push`(本仓库首次引入,无需命名路由)进子页。**不复用** `SpeakingBubblesView`。
+- `main_shell.dart`:3 个 Tab(合成 / 对话 / 设置),`IndexedStack` 常驻各页;`SynthesizePage.onNavigateToSettings`/`ConversationPage.onNavigateToSettings` → `_switchTo(2)`。
+- `conversation_page.dart`:初始化卡片(未就绪)→ 状态胶囊 + 当前说话人胶囊 + 聊天气泡(用户徽章/时间戳/流式助手文本)+ 开始/停止 + 静音 + 声音选择器 + 清空历史;**Header = 左侧历史入口 + 中间音频/文本模式切换 + 右侧设置按钮**;音频模式仅显示最后一轮、文本模式显示全部并带输入框;长按删除单条。**不复用** `SpeakingBubblesView`。
+- `history_page.dart`(push):单一时间线历史浏览 + 「加载更早」分页 + 长按删除单条。
+- `tts_settings_page.dart`:两级(大类 ListTile → 子页),子页含各自模型下载;通用页含清理缓存。
 - `clone_voices_page.dart`(push):克隆音列表 + 新建(命名→录 3–10s 参考)+ 删除。
-- `voiceprint_page.dart`(push):说话人列表 + 注册(名字+备注+录 2–3 段)+ 测试识别 + 删除。
-- `conversation_settings_page.dart`(push):LLM(baseUrl/ApiKey/模型/系统提示)、ASR 模型下拉、VAD 阈值/静音时长、声纹阈值滑块。
+- `voiceprint_page.dart`:说话人列表 + 注册(整页 + 圆形居中录音按钮,支持连续注册多个)+ 测试识别 + 删除。
 
 ### 5.7 设置与持久化
-`TtsSettings`+`SettingsState` 新增:llmBaseUrl(`https://api.deepseek.com/v1`)、llmApiKey、llmModel(`deepseek-chat`;用户可填其"V4 Flash"标识)、llmSystemPrompt、asrModelId、voiceprintThreshold(0.6)、vadThreshold(0.5)/vadMinSilence(0.5)/vadMaxSpeech(15)、conversationVoiceType(model|clone)/conversationModelVoiceId/conversationCloneId/conversationSid。
-dva 新命名空间:`clones`、`voiceprints`(含备注)、`conversation`(按说话人分桶);注册进 `app_dva.dart`。
+`TtsSettings`+`SettingsState` 新增:llmBaseUrl(`https://api.deepseek.com/v1`)、llmApiKey、llmModel(`deepseek-v4-flash`/`deepseek-v4-pro`;LLM 页内置 DeepSeek/Moonshot/智谱/通义千问服务商预设 + 自定义)、llmSystemPrompt、asrModelId、voiceprintThreshold(0.6)、vadThreshold(0.5)/vadMinSilence(0.5)/vadMaxSpeech(15)、conversationVoiceType(model|clone)/conversationModelVoiceId/conversationCloneId/conversationSid。
+dva 新命名空间:`clones`、`voiceprints`(含备注);注册进 `app_dva.dart`。**会话历史改用 SQLite**(`sqflite`,`version`+`onUpgrade` 版本化迁移),见 `conversation_store.dart`。
 
 ### 5.8 l10n 键(zh+en 同步,gen-l10n)
 conversationTab、startConversation/stopConversation、listening/recognizing/thinking/speaking、speakerUnknown、currentSpeaker(占位符)、currentSpeakerChip(占位符)、guestMode、registerHint、speakerNoteHint、micMuted/micUnmuted、cloneVoicesTitle、recordReferenceHint、voiceprintTitle、enrollSpeaker、identifyTest、conversationSettingsTitle、llmBaseUrl/ApiKey/Model/SystemPrompt、asrModelLabel、vadThreshold/vadMinSilence、voiceprintThreshold、micPermissionDenied、模型种类标签(语音识别/声纹/克隆/VAD)、emptyAsrText、clearConversation、sendError/llmError、initModelsTitle、initModelsHint、initReady、downloadInitialModels、initProgress(占位符)、initRetry、initDone。
@@ -229,17 +237,17 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
 
 ## 六、实施阶段(每阶段可验证)
 
-- [ ] **0 写入 TODO.md**:本文件即交接文档(已完成)。
-- [ ] **1 重构(无行为变化)**:`ModelKind`/`downloadFormat`/`rawFileName`、抽 `IsolateBridge`(含单向/事件通道)并重构 `SherpaTtsEngine`、加 `wav_reader`。验证:现有 test+patrol 全绿。
-- [ ] **2 目录/下载泛化**:新增 5 项模型、resolver 按 kind、manager raw 分支、管理页标签、设置页过滤。验证:resolver 各 kind 单测、manager raw 路径单测;手动下载声纹+VAD 确认 ready。
-- [ ] **3 录音基建**:`MicRecorder` 流式+落盘+权限;`wav_reader_test` 与 `wav_encoder` 往返。
-- [ ] **4 VAD**:`VadEngine` 流式+段回调单测(合成 PCM 断言 SpeechSegment);真机静音/说话切换。
-- [ ] **5 ASR**:`AsrEngine`+`AsrService`+`asrModelId` 设置。
-- [ ] **6 声纹**:`SpeakerEngine`+`VoiceprintService`+注册/识别/删除+持久化。
-- [ ] **7 克隆**:`PocketTtsEngine`+`VoiceCloningService`+克隆音管理 UI。
-- [ ] **8 LLM**:`LlmClient/Service`+SSE 解析+`llm_client_test`(mock dio 喂 `data:`/`[DONE]`/UTF-8 跨块)。
-- [ ] **9 对话集成+UI**:`ConversationService`(VAD 常开+按人记忆+一键初始化)、对话页、子页、Tab 接线、l10n 重生成;widget 测试全 fake(初始化卡片四态:未就绪/就绪/下载中/完成)。
-- [ ] **10 验证收尾**:真机全流程;patrol 扩展 `conversation_test.dart`;截图。
+- [x] **0 写入 TODO.md**:本文件即交接文档(已完成)。
+- [x] **1 重构(无行为变化)**:`ModelKind`/`downloadFormat`/`rawFileName`、抽 `IsolateBridge`(含单向/事件通道)并重构 `SherpaTtsEngine`、加 `wav_reader`。验证:现有 test+patrol 全绿(58 test)。
+- [x] **2 目录/下载泛化**:新增 5 项模型、resolver 按 kind、manager raw 分支、管理页标签、设置页过滤。验证:resolver 各 kind 单测、manager raw 路径单测(`test/model_kind_test.dart`)。
+- [x] **3 录音基建**:`MicRecorder` 流式+落盘+权限;`wav_reader_test` 与 `wav_encoder` 往返。
+- [x] **4 VAD**:`VadEngine` 流式+段回调(`TransferableTypedData` 零拷贝)。真机静音/说话切换待设备验证。
+- [x] **5 ASR**:`AsrEngine`+`AsrService`+`asrModelId` 设置。
+- [x] **6 声纹**:`SpeakerEngine`+`VoiceprintService`+注册/识别/删除+持久化。
+- [x] **7 克隆**:`PocketTtsEngine`+`VoiceCloningService`+克隆音管理 UI。
+- [x] **8 LLM**:`LlmClient/Service`+SSE 解析+`llm_client_test`(mock dio 喂 `data:`/`[DONE]`/UTF-8 跨块)。
+- [x] **9 对话集成+UI**:`ConversationService`(VAD 常开+按人记忆+一键初始化)、对话页、子页、Tab 接线、l10n 重生成;widget 测试全 fake(`conversation_page_test`/`conversation_service_test`)。
+- [ ] **10 验证收尾**:真机全流程;`patrol_test/conversation_test.dart` 已编写(需 Android 设备/模拟器运行);截图。
 
 ## 七、风险与坑(实施必读)
 
@@ -248,7 +256,7 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
 3. **声纹/VAD 是裸 onnx**:`ModelManager` 的 rawFile 分支必须跳过 bzip2 魔数校验与解压,勿对 `silero_vad.onnx`/eres2net.onnx 走解压路径。
 4. **`SpeakerEmbeddingExtractor` 用 `OnlineStream`**(不是 `OfflineStream`,勿照抄 ASR worker);`while(isReady){})` 忙等会阻塞 worker 事件循环 → bridge 必须串行,勿并发调用 speaker 引擎。
 5. **SSE 解析**:多字节 UTF-8 跨 TCP 块必须状态化 `utf8.decoder`;处理 `data: [DONE]`、空 keepalive `data:` 行、provider 错误 payload;401/空 key 转友好错误。
-6. **DeepSeek 模型 id**:真实 API 为 `deepseek-chat`/`deepseek-reasoner`;"DeepSeek V4 Flash"是用户自定义标识,存于设置 `llmModel` 字段。baseUrl 默认 `https://api.deepseek.com/v1`(OpenAI 兼容)。
+6. **DeepSeek 模型 id**:`deepseek-v4-flash` / `deepseek-v4-pro`,存于设置 `llmModel` 字段;baseUrl 默认 `https://api.deepseek.com/v1`(OpenAI 兼容),LLM 页内置 DeepSeek/Moonshot/智谱/通义千问服务商预设 + 自定义。
 7. **l10n**:键必须同时写 `app_zh.arb` 和 `app_en.arb`,否则 gen 失败;占位符需 `@key` 元数据。
 8. **现有测试**:`AppDependencies` 只加可选参数;`TtsModel`/`ResolvedModelPaths` 新字段带默认值 → 现有构造不破坏。实施前 grep 是否有断言 `ModelCatalog.all.length` 或"全部 multi-speaker"的测试。
 9. **IndexedStack 保持各 Tab 存活**:任何 sherpa isolate 不得在对话页 build 时 spawn(引擎全部懒加载);对话播报前 `streamingService.stop()`。
@@ -267,5 +275,6 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
 
 ## 关键文件清单
 
-- 修改:`lib/models/tts_model.dart`、`lib/data/model_catalog.dart`、`lib/data/model_files_resolver.dart`、`lib/data/model_manager.dart`、`lib/app_dependencies.dart`、`lib/app.dart`、`lib/ui/main_shell.dart`、`lib/ui/tts_settings_page.dart`、`lib/ui/model_manage_page.dart`、`lib/models/tts_settings.dart`、`lib/dva/app_models.dart`、`lib/dva/app_dva.dart`、`lib/tts/tts_streaming_service.dart`、`pubspec.yaml`、`android/app/src/main/AndroidManifest.xml`、`android/app/build.gradle.kts`(minSdk)、`lib/l10n/app_zh.arb`+`app_en.arb`
-- 新增:`lib/tts/isolate_bridge.dart`、`lib/tts/wav_reader.dart`、`lib/tts/vad_engine.dart`、`lib/tts/asr_engine.dart`、`lib/tts/speaker_engine.dart`、`lib/tts/pocket_tts_engine.dart`、`lib/audio/mic_recorder.dart`、`lib/asr/asr_service.dart`、`lib/voiceprint/voiceprint_service.dart`、`lib/llm/llm_client.dart`、`lib/llm/llm_service.dart`、`lib/voiceclone/voice_cloning_service.dart`、`lib/conversation/conversation_service.dart`、`lib/ui/conversation_page.dart`、`lib/ui/clone_voices_page.dart`、`lib/ui/voiceprint_page.dart`、`lib/ui/conversation_settings_page.dart`
+- 修改:`lib/models/tts_model.dart`、`lib/data/model_catalog.dart`、`lib/data/model_files_resolver.dart`、`lib/data/model_manager.dart`、`lib/app_dependencies.dart`、`lib/app.dart`、`lib/ui/main_shell.dart`、`lib/ui/tts_settings_page.dart`、`lib/models/tts_settings.dart`、`lib/dva/app_models.dart`、`lib/dva/app_dva.dart`、`lib/tts/tts_streaming_service.dart`、`pubspec.yaml`、`android/app/src/main/AndroidManifest.xml`、`android/app/build.gradle.kts`(minSdk)、`lib/l10n/app_zh.arb`+`app_en.arb`
+- 新增:`lib/tts/isolate_bridge.dart`、`lib/tts/wav_reader.dart`、`lib/tts/vad_engine.dart`、`lib/tts/asr_engine.dart`、`lib/tts/speaker_engine.dart`、`lib/tts/pocket_tts_engine.dart`、`lib/audio/mic_recorder.dart`、`lib/asr/asr_service.dart`、`lib/voiceprint/voiceprint_service.dart`、`lib/llm/llm_client.dart`、`lib/llm/llm_service.dart`、`lib/voiceclone/voice_cloning_service.dart`、`lib/conversation/conversation_message.dart`、`lib/conversation/conversation_store.dart`、`lib/conversation/conversation_service.dart`、`lib/ui/conversation_page.dart`、`lib/ui/history_page.dart`、`lib/ui/clone_voices_page.dart`、`lib/ui/voiceprint_page.dart`、`lib/ui/widgets/conversation_bubble.dart`
+- 删除:`lib/ui/model_manage_page.dart`、`lib/ui/conversation_settings_page.dart`(模型管理/对话设置已并入设置页两级结构)。

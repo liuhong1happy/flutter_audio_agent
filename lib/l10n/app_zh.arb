@@ -42,8 +42,15 @@
   "genericError": "发生错误",
   "goSettings": "去设置",
 
-  "settingsTitle": "TTS 设置",
+  "settingsTitle": "设置",
   "sectionModel": "模型",
+  "sectionTts": "语音合成",
+  "sectionAsr": "语音识别",
+  "sectionVad": "语音活动检测",
+  "sectionVoiceprint": "声纹识别",
+  "sectionLlm": "大模型 (LLM)",
+  "sectionGeneral": "通用",
+  "modelDownloadLabel": "模型下载",
   "noModelDownloaded": "尚未下载任何模型",
   "noModelHint": "先到模型管理页下载一个模型,再回来选择。",
   "goModel": "去下载",
@@ -114,5 +121,94 @@
     }
   },
 
-  "streamingEmptyHint": "输入文本后点击\"合成并播放\",这里会逐句高亮显示朗读进度。"
+  "streamingEmptyHint": "输入文本后点击\"合成并播放\",这里会逐句高亮显示朗读进度。",
+
+  "kindLabelTts": "语音合成",
+  "kindLabelAsr": "语音识别",
+  "kindLabelSpeaker": "声纹",
+  "kindLabelClone": "声音克隆",
+  "kindLabelVad": "VAD",
+
+  "conversationTab": "对话",
+  "audioMode": "音频",
+  "textMode": "文本",
+  "textInputHint": "输入消息…",
+
+  "listening": "聆听中…",
+  "recognizing": "识别中…",
+  "thinking": "思考中…",
+  "speaking": "回复中…",
+
+  "startConversation": "开始对话",
+  "stopConversation": "停止对话",
+  "clearConversation": "清空对话",
+
+  "speakerUnknown": "未知用户",
+  "currentSpeaker": "当前说话人:{name}",
+  "@currentSpeaker": {
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "guestMode": "访客模式",
+  "registerHint": "未识别说话人,可在声纹页注册",
+  "speakerNoteHint": "备注(如:同事 / 家人)",
+  "micMuted": "麦克风已静音",
+  "micUnmuted": "麦克风已恢复",
+
+  "cloneVoicesTitle": "克隆音",
+  "newCloneVoice": "新建克隆音",
+  "cloneNameHint": "克隆音名字",
+  "recordReferenceHint": "录 3–10 秒参考语音",
+  "noCloneVoices": "尚无克隆音,点右下角新建。",
+
+  "voiceprintTitle": "声纹",
+  "enrollSpeaker": "注册说话人",
+  "identifyTest": "测试识别",
+  "enrollName": "名字",
+  "enrollNote": "备注",
+  "noSpeakers": "尚未注册说话人。",
+  "enrollSegmentsHint": "请录 2–3 段语音(每段 2 秒以上)",
+
+  "conversationSettingsTitle": "对话设置",
+  "llmProvider": "服务商",
+  "llmProviderCustom": "自定义",
+  "llmBaseUrl": "LLM 地址",
+  "llmApiKey": "API Key",
+  "llmModel": "模型",
+  "llmSystemPrompt": "系统提示词",
+  "asrModelLabel": "识别模型 (ASR)",
+  "vadThreshold": "VAD 阈值",
+  "vadMinSilence": "静音时长(秒)",
+  "voiceprintThreshold": "声纹阈值",
+  "voiceSelectLabel": "对话声音",
+  "voiceModelLabel": "模型音色",
+  "voiceCloneLabel": "克隆音",
+
+  "initModelsTitle": "初始化对话",
+  "initModelsHint": "首次使用需下载语音对话所需模型(约 250MB)。",
+  "initReady": "已就绪",
+  "downloadInitialModels": "一键下载",
+  "initProgress": "下载中 {percent}%",
+  "@initProgress": {
+    "placeholders": {"percent": {"type": "int"}}
+  },
+  "initRetry": "重试",
+  "initDone": "初始化完成",
+
+  "micPermissionDenied": "麦克风权限被拒绝",
+  "emptyAsrText": "未识别到语音",
+  "llmError": "LLM 调用失败",
+  "startRecording": "开始录音",
+  "stopRecording": "停止录音",
+  "recording": "录音中…",
+  "save": "保存",
+  "delete": "删除",
+
+  "conversationHistory": "历史记录",
+  "historyEmpty": "暂无历史对话",
+  "deleteMessageConfirm": "删除这条消息?",
+  "loadOlder": "加载更早",
+  "messageCount": "{count} 条消息",
+  "@messageCount": {
+    "placeholders": {"count": {"type": "int"}}
+  }
 }

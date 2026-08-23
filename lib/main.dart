@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'app.dart';
-import 'app_dependencies.dart';
-import 'dva/app_dva.dart';
+import 'package:flutter_tts_demo/app.dart';
+import 'package:flutter_tts_demo/data/app_dependencies.dart';
+import 'package:flutter_tts_demo/data/dva/app_dva.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

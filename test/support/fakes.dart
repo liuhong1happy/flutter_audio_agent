@@ -10,12 +10,20 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_tts_demo/utils/mic_recorder.dart';
+import 'package:flutter_tts_demo/data/models/conversation_message.dart';
+import 'package:flutter_tts_demo/data/conversation_store.dart';
 import 'package:flutter_tts_demo/data/model_downloader.dart';
 import 'package:flutter_tts_demo/data/model_files_resolver.dart';
-import 'package:flutter_tts_demo/models/tts_model.dart';
-import 'package:flutter_tts_demo/models/tts_settings.dart';
-import 'package:flutter_tts_demo/tts/sequential_audio_player.dart';
-import 'package:flutter_tts_demo/tts/tts_engine.dart';
+import 'package:flutter_tts_demo/utils/llm_client.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
+import 'package:flutter_tts_demo/data/models/tts_settings.dart';
+import 'package:flutter_tts_demo/utils/engines/asr_engine.dart';
+import 'package:flutter_tts_demo/utils/engines/pocket_tts_engine.dart';
+import 'package:flutter_tts_demo/utils/sequential_audio_player.dart';
+import 'package:flutter_tts_demo/utils/engines/speaker_engine.dart';
+import 'package:flutter_tts_demo/utils/engines/tts_engine.dart';
+import 'package:flutter_tts_demo/utils/engines/vad_engine.dart';
 
 /// 记录型假引擎:记录每次合成请求,返回短静音音频。
 class FakeTtsEngine implements TtsEngine {
@@ -193,10 +201,15 @@ class FakeModelDownloader implements ModelDownloader {
     if (cancelToken?.isCancelled ?? false) return;
     onProgress?.call(0, 100);
 
-    final bytes = buildFakeModelArchive();
     final file = File(savePath);
     await file.parent.create(recursive: true);
-    await file.writeAsBytes(bytes);
+    // 裸文件(rawFile,URL 以 .onnx 结尾)写一段足够大的原始字节;
+    // tar.bz2 模型写内含占位模型文件的归档。
+    if (url.endsWith('.onnx')) {
+      await file.writeAsBytes(List<int>.generate(2048, (i) => i % 251));
+    } else {
+      await file.writeAsBytes(buildFakeModelArchive());
+    }
 
     onProgress?.call(100, 100);
   }
@@ -215,4 +228,237 @@ Uint8List buildFakeModelArchive() {
   archive.addFile(ArchiveFile.string('$base/number.fst', ''));
   final tar = TarEncoder().encodeBytes(archive);
   return BZip2Encoder().encodeBytes(tar);
+}
+
+/// 假麦克风:不触碰真实录音平台,可编程地吐出 PCM16 字节流。
+class FakeMicRecorder implements MicRecorder {
+  FakeMicRecorder({this.permissionGranted = true});
+
+  bool permissionGranted;
+  int startStreamCalls = 0;
+  final List<String> recordedPaths = [];
+  final StreamController<Uint8List> _controller =
+      StreamController<Uint8List>.broadcast();
+
+  /// 模拟设备吐出 PCM16 字节。
+  void emitPcm(Uint8List bytes) => _controller.add(bytes);
+
+  @override
+  Future<bool> hasPermission({bool request = true}) async => permissionGranted;
+
+  @override
+  Future<Stream<Uint8List>> startStream({int sampleRate = 16000}) async {
+    startStreamCalls++;
+    return _controller.stream;
+  }
+
+  @override
+  Future<void> stopStream() async {}
+
+  @override
+  Future<void> start({required String path, required int sampleRate}) async {
+    recordedPaths.add(path);
+  }
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> dispose() async {
+    await _controller.close();
+  }
+}
+
+/// 假 ASR 引擎:识别返回预设文本。
+class FakeAsrEngine extends AsrEngine {
+  String nextText = '';
+
+  @override
+  bool get isLoaded => true;
+
+  @override
+  Future<void> load({
+    required String kind,
+    required String modelPath,
+    required String tokensPath,
+    int numThreads = 2,
+  }) async {}
+
+  @override
+  Future<AsrResult> recognize(Float32List samples, int sampleRate) async =>
+      AsrResult(text: nextText);
+
+  @override
+  void dispose() {}
+}
+
+/// 假声纹引擎:识别返回预设名字。
+class FakeSpeakerEngine extends SpeakerEngine {
+  String nextName = '';
+
+  @override
+  bool get isLoaded => true;
+
+  @override
+  Future<void> load({required String modelPath, int numThreads = 1}) async {}
+
+  @override
+  Future<Float32List> extract(Float32List samples, int sampleRate) async =>
+      Float32List(192);
+
+  @override
+  Future<bool> add(String name, Float32List embedding) async => true;
+
+  @override
+  Future<bool> addMulti(String name, List<Float32List> embeddings) async => true;
+
+  @override
+  Future<bool> remove(String name) async => true;
+
+  @override
+  Future<String> search(Float32List embedding, double threshold) async =>
+      nextName;
+
+  @override
+  Future<bool> verify(
+    String name,
+    Float32List embedding,
+    double threshold,
+  ) async =>
+      true;
+
+  @override
+  void dispose() {}
+}
+
+/// 假 VAD 引擎:可编程触发语音段。
+class FakeVadEngine extends VadEngine {
+  bool _loaded = true;
+
+  @override
+  bool get isLoaded => _loaded;
+
+  @override
+  Future<void> load({
+    required String model,
+    double threshold = 0.5,
+    double minSilenceDuration = 0.5,
+    double minSpeechDuration = 0.25,
+    int windowSize = 512,
+    double maxSpeechDuration = 15.0,
+    int sampleRate = 16000,
+    double bufferSizeInSeconds = 60,
+  }) async {
+    _loaded = true;
+  }
+
+  @override
+  Future<void> addSamples(Float32List samples) async {}
+
+  /// 触发一段语音(模拟 VAD 检测到段)。
+  void emitSegment(Float32List samples) =>
+      onSegment?.call(VadSegment(samples: samples, start: 0));
+
+  @override
+  void dispose() {
+    _loaded = false;
+  }
+}
+
+/// 假 PocketTTS 克隆引擎:返回静音音频。
+class FakePocketTtsEngine extends PocketTtsEngine {
+  @override
+  bool get isLoaded => true;
+
+  @override
+  Future<void> load({required PocketModelPaths paths, int numThreads = 2}) async {}
+
+  @override
+  Future<GeneratedAudioData> generate({
+    required String text,
+    required Float32List refSamples,
+    required int refRate,
+    int numSteps = 5,
+    int seed = 42,
+  }) async =>
+      GeneratedAudioData(samples: Float32List(800), sampleRate: 16000);
+
+  @override
+  void dispose() {}
+}
+
+/// 假 LLM 客户端:逐段产出预设文本块。
+class FakeLlmClient implements LlmClient {
+  FakeLlmClient({this.chunks = const []});
+
+  final List<String> chunks;
+  final List<List<LlmMessage>> capturedMessages = [];
+
+  @override
+  Stream<String> streamChat({
+    required String baseUrl,
+    required String apiKey,
+    required String model,
+    required List<LlmMessage> messages,
+    CancelToken? cancel,
+  }) async* {
+    capturedMessages.add(messages);
+    for (final c in chunks) {
+      yield c;
+    }
+  }
+}
+
+/// 内存版会话历史存储:与 [SqliteConversationStore] 同接口,供单测用。
+class MemoryConversationStore implements ConversationStore {
+  final List<ConversationMessage> _all = [];
+  int _nextId = 1;
+
+  @override
+  Future<void> open() async {}
+
+  @override
+  Future<int> insert(ConversationMessage message) async {
+    final id = _nextId++;
+    _all.add(ConversationMessage(
+      id: id,
+      role: message.role,
+      content: message.content,
+      speakerName: message.speakerName,
+      createdAt: message.createdAt,
+    ));
+    return id;
+  }
+
+  @override
+  Future<List<ConversationMessage>> recent({int limit = 50}) async {
+    final sorted = [..._all]..sort((a, b) => a.id!.compareTo(b.id!));
+    if (sorted.length <= limit) return sorted;
+    return sorted.sublist(sorted.length - limit);
+  }
+
+  @override
+  Future<List<ConversationMessage>> olderThan({
+    required int beforeId,
+    int limit = 20,
+  }) async {
+    final sorted = [..._all]..sort((a, b) => a.id!.compareTo(b.id!));
+    final older = sorted.where((m) => m.id! < beforeId).toList();
+    if (older.length <= limit) return older;
+    return older.sublist(older.length - limit);
+  }
+
+  @override
+  Future<int> count() async => _all.length;
+
+  @override
+  Future<void> deleteById(int id) async {
+    _all.removeWhere((m) => m.id == id);
+  }
+
+  @override
+  Future<void> clearAll() async => _all.clear();
+
+  @override
+  Future<void> close() async {}
 }

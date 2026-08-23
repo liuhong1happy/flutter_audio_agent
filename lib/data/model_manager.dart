@@ -11,14 +11,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dva/flutter_dva.dart';
 import 'package:path/path.dart' as p;
 
-import '../dva/app_dva.dart';
-import '../dva/app_models.dart';
-import '../models/tts_model.dart';
-import '../models/tts_settings.dart';
-import 'archive_extractor.dart';
-import 'model_catalog.dart';
-import 'model_downloader.dart';
-import 'model_files_resolver.dart';
+import 'package:flutter_tts_demo/data/dva/app_dva.dart';
+import 'package:flutter_tts_demo/data/dva/app_models.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
+import 'package:flutter_tts_demo/data/models/tts_settings.dart';
+import 'package:flutter_tts_demo/data/archive_extractor.dart';
+import 'package:flutter_tts_demo/data/model_catalog.dart';
+import 'package:flutter_tts_demo/data/model_downloader.dart';
+import 'package:flutter_tts_demo/data/model_files_resolver.dart';
 
 /// 单个模型的下载生命周期状态。
 enum DownloadStatus {
@@ -107,6 +107,16 @@ class ModelManager extends ChangeNotifier {
   String modelArchivePath(TtsModel model) =>
       p.join(modelsDir.path, model.id, '${model.id}.tar.bz2');
 
+  /// 裸文件(rawFile)的落盘路径。
+  String rawFilePath(TtsModel model) =>
+      p.join(modelUnpackedDir(model), model.rawFileName ?? '');
+
+  /// 下载目标路径:tar.bz2 为压缩包,rawFile 为裸文件。
+  String downloadTargetPath(TtsModel model) =>
+      model.downloadFormat == ModelDownloadFormat.rawFile
+          ? rawFilePath(model)
+          : modelArchivePath(model);
+
   /// 下载地址候选列表(多镜像自动回退)。
   ///
   /// 顺序:手动镜像(设置里填)→ 国内 GitHub 代理 → 直连 GitHub(兜底)。
@@ -147,6 +157,8 @@ class ModelManager extends ChangeNotifier {
     _cancelTokens[model.id] = cancelToken;
 
     try {
+      final isRaw = model.downloadFormat == ModelDownloadFormat.rawFile;
+
       // 多镜像回退:依次尝试,成功即止。
       final candidates = downloadCandidates(model);
       var succeeded = false;
@@ -163,7 +175,7 @@ class ModelManager extends ChangeNotifier {
         try {
           await downloader.download(
             url: url,
-            savePath: modelArchivePath(model),
+            savePath: downloadTargetPath(model),
             cancelToken: cancelToken,
             onProgress: (received, total) {
               final progress = total > 0 ? received / total : 0.0;
@@ -173,8 +185,8 @@ class ModelManager extends ChangeNotifier {
               ));
             },
           );
-          // 校验是否真的是 bzip2(tar.bz2 魔数 BZh),避免代理返回错误页面。
-          if (!await _isValidBzip2(modelArchivePath(model))) {
+          // tar.bz2 校验魔数(BZh),避免代理返回错误页;rawFile 跳过。
+          if (!isRaw && !await _isValidBzip2(downloadTargetPath(model))) {
             throw StateError('响应不是有效的 tar.bz2');
           }
           succeeded = true;
@@ -188,7 +200,7 @@ class ModelManager extends ChangeNotifier {
           lastError = '$e';
           if (cancelToken.isCancelled) break;
           // 文件完整但校验失败(魔数/解压/大小),删除以便重新完整下载。
-          await _deleteIfExists(modelArchivePath(model));
+          await _deleteIfExists(downloadTargetPath(model));
           // 继续下一个源。
         }
       }
@@ -197,15 +209,17 @@ class ModelManager extends ChangeNotifier {
         throw StateError('所有下载源均失败: $lastError');
       }
 
-      // 解压。
-      _setState(model, const ModelDownloadState(
-        status: DownloadStatus.extracting,
-        progress: 1.0,
-      ));
-      await extractor.extractTarBz2(
-        archivePath: modelArchivePath(model),
-        outputDir: modelUnpackedDir(model),
-      );
+      // tar.bz2 需解压;rawFile 直接落盘到 unpacked 目录,跳过解压。
+      if (!isRaw) {
+        _setState(model, const ModelDownloadState(
+          status: DownloadStatus.extracting,
+          progress: 1.0,
+        ));
+        await extractor.extractTarBz2(
+          archivePath: modelArchivePath(model),
+          outputDir: modelUnpackedDir(model),
+        );
+      }
 
       // 校验关键文件是否齐全 + 主模型非平凡大小(防止损坏/截断的空文件)。
       final resolved = resolver.resolve(model, modelUnpackedDir(model));

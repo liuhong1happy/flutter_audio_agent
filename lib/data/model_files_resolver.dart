@@ -2,13 +2,43 @@
 ///
 /// sherpa-onnx 各模型包的文件名不完全一致(int8/fp32 变体、多 lexicon 等),
 /// 因此采用"按模式扫描 + 优先 int8"的策略,而不是硬编码文件名。
+/// 按 [ModelKind] 分支,区分 TTS / ASR / 声纹·VAD / Pocket 克隆的完整性。
 library;
 
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../models/tts_model.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
+
+/// PocketTTS 克隆模型的 7 个文件路径。
+class PocketModelPaths {
+  const PocketModelPaths({
+    required this.lmFlow,
+    required this.lmMain,
+    required this.encoder,
+    required this.decoder,
+    required this.textConditioner,
+    required this.vocabJson,
+    required this.tokenScoresJson,
+  });
+
+  final String lmFlow;
+  final String lmMain;
+  final String encoder;
+  final String decoder;
+  final String textConditioner;
+  final String vocabJson;
+  final String tokenScoresJson;
+
+  bool get isComplete => lmFlow.isNotEmpty &&
+      lmMain.isNotEmpty &&
+      encoder.isNotEmpty &&
+      decoder.isNotEmpty &&
+      textConditioner.isNotEmpty &&
+      vocabJson.isNotEmpty &&
+      tokenScoresJson.isNotEmpty;
+}
 
 /// 解析后的模型文件绝对路径集合。
 class ResolvedModelPaths {
@@ -20,6 +50,8 @@ class ResolvedModelPaths {
     this.voicesPath,
     this.dataDir,
     this.ruleFsts = const [],
+    this.kind = ModelKind.tts,
+    this.pocket,
   });
 
   final String rootDir;
@@ -37,8 +69,26 @@ class ResolvedModelPaths {
 
   final List<String> ruleFsts;
 
-  bool get isComplete =>
-      modelPath != null && tokensPath != null && (lexiconPath != null || dataDir != null);
+  final ModelKind kind;
+  final PocketModelPaths? pocket;
+
+  /// 按种类判断关键文件是否齐全。
+  bool get isComplete {
+    switch (kind) {
+      case ModelKind.tts:
+        return modelPath != null &&
+            tokensPath != null &&
+            (lexiconPath != null || dataDir != null);
+      case ModelKind.asrParaformer:
+      case ModelKind.asrSenseVoice:
+        return modelPath != null && tokensPath != null;
+      case ModelKind.speaker:
+      case ModelKind.vad:
+        return modelPath != null;
+      case ModelKind.pocket:
+        return pocket?.isComplete ?? false;
+    }
+  }
 }
 
 class ModelFilesResolver {
@@ -63,17 +113,43 @@ class ModelFilesResolver {
       return null;
     }
 
-    // 主模型文件:优先 int8,再 fp16,最后任意 .onnx。
-    final modelPath = find(
-      predicate: (name) =>
-          name.endsWith('.onnx') && name.toLowerCase().contains('int8'),
-    ) ??
+    switch (model.kind) {
+      case ModelKind.tts:
+        return _resolveTts(model, rootDir, allFiles, allDirs, find);
+      case ModelKind.asrParaformer:
+      case ModelKind.asrSenseVoice:
+        return _resolveAsr(model, rootDir, find);
+      case ModelKind.speaker:
+      case ModelKind.vad:
+        return _resolveRaw(model, rootDir, find);
+      case ModelKind.pocket:
+        return _resolvePocket(model, rootDir, find);
+    }
+  }
+
+  /// 主模型文件:优先 int8,再 fp16,最后任意 .onnx。
+  static String? _findModel(
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    return find(
+          predicate: (name) =>
+              name.endsWith('.onnx') && name.toLowerCase().contains('int8'),
+        ) ??
         find(
           predicate: (name) =>
               name.endsWith('.onnx') && name.toLowerCase().contains('fp16'),
         ) ??
         find(predicate: (name) => name.endsWith('.onnx'));
+  }
 
+  ResolvedModelPaths _resolveTts(
+    TtsModel model,
+    String rootDir,
+    List<File> allFiles,
+    List<Directory> allDirs,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    final modelPath = _findModel(find);
     final tokens = find(predicate: (name) => name == 'tokens.txt');
 
     final String? lexicon;
@@ -88,7 +164,8 @@ class ModelFilesResolver {
       if (zh != null && en != null) {
         lexicon = '$en,$zh';
       } else {
-        lexicon = find(predicate: (name) => name.toLowerCase().contains('lexicon'));
+        lexicon =
+            find(predicate: (name) => name.toLowerCase().contains('lexicon'));
       }
     } else {
       lexicon = find(predicate: (name) => name == 'lexicon.txt');
@@ -128,6 +205,62 @@ class ModelFilesResolver {
       voicesPath: voices,
       dataDir: dataDir,
       ruleFsts: ruleFsts,
+      kind: ModelKind.tts,
+    );
+  }
+
+  ResolvedModelPaths _resolveAsr(
+    TtsModel model,
+    String rootDir,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    return ResolvedModelPaths(
+      rootDir: rootDir,
+      modelPath: _findModel(find),
+      tokensPath: find(predicate: (name) => name == 'tokens.txt'),
+      kind: model.kind,
+    );
+  }
+
+  ResolvedModelPaths _resolveRaw(
+    TtsModel model,
+    String rootDir,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    // 裸文件优先按 rawFileName 精确匹配,回退任意 .onnx。
+    final modelPath =
+        (model.rawFileName != null
+            ? find(predicate: (name) => name == model.rawFileName)
+            : null) ??
+        find(predicate: (name) => name.endsWith('.onnx'));
+    return ResolvedModelPaths(
+      rootDir: rootDir,
+      modelPath: modelPath,
+      kind: model.kind,
+    );
+  }
+
+  ResolvedModelPaths _resolvePocket(
+    TtsModel model,
+    String rootDir,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    // Pocket 的 encoder.onnx 是 fp32,勿用 int8 优先规则,按精确名匹配。
+    final pocket = PocketModelPaths(
+      lmFlow: find(predicate: (name) => name == 'lm_flow.int8.onnx') ?? '',
+      lmMain: find(predicate: (name) => name == 'lm_main.int8.onnx') ?? '',
+      encoder: find(predicate: (name) => name == 'encoder.onnx') ?? '',
+      decoder: find(predicate: (name) => name == 'decoder.int8.onnx') ?? '',
+      textConditioner:
+          find(predicate: (name) => name == 'text_conditioner.onnx') ?? '',
+      vocabJson: find(predicate: (name) => name == 'vocab.json') ?? '',
+      tokenScoresJson:
+          find(predicate: (name) => name == 'token_scores.json') ?? '',
+    );
+    return ResolvedModelPaths(
+      rootDir: rootDir,
+      pocket: pocket,
+      kind: ModelKind.pocket,
     );
   }
 }

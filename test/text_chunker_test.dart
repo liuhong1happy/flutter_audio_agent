@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_tts_demo/tts/text_chunker.dart';
+import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

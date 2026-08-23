@@ -12,10 +12,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_tts_demo/app.dart';
-import 'package:flutter_tts_demo/app_dependencies.dart';
+import 'package:flutter_tts_demo/data/app_dependencies.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
-import 'package:flutter_tts_demo/tts/text_chunker.dart';
+import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 import 'support/fakes.dart';
 
@@ -32,8 +32,12 @@ void main() {
       chunker: TextChunker(enableJieba: false),
       extractor: const ArchiveExtractor(useCompute: false),
       player: playback,
+      micRecorder: FakeMicRecorder(),
+      conversationPlayer: FakeAudioPlaybackQueue(),
+      conversationStore: MemoryConversationStore(),
       modelsDirProvider: () async => Directory('${tempDir.path}/models'),
       audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+      cloneRefsDirProvider: () async => Directory('${tempDir.path}/clone_refs'),
     );
 
     // 真实文件 I/O(下载 tar.bz2 → 解压)须在 runAsync 中执行。

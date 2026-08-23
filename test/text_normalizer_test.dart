@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_tts_demo/tts/text_normalizer.dart';
+import 'package:flutter_tts_demo/utils/text_normalizer.dart';
 
 void main() {
   group('TextNormalizer 基本数字', () {

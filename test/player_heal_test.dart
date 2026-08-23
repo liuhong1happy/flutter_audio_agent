@@ -14,8 +14,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:audioplayers_platform_interface/audioplayers_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_tts_demo/tts/sequential_audio_player.dart';
-import 'package:flutter_tts_demo/tts/wav_encoder.dart';
+import 'package:flutter_tts_demo/utils/sequential_audio_player.dart';
+import 'package:flutter_tts_demo/utils/wav_encoder.dart';
 
 /// 全局平台 mock:init 等返回立即完成的 Future,事件流为空。
 class _MockGlobalPlatform extends GlobalAudioplayersPlatformInterface {

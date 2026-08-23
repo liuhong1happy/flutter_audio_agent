@@ -4,16 +4,23 @@
 
 ## 功能
 
-1. **底部 Tab 布局** — 合成 / 模型 / 设置三个平级 Tab,`IndexedStack` 常驻各页,播放中切换不中断。
-2. **TTS 模型下载管理** — 内置模型目录,支持下载(进度/取消)、删除、清理全部缓存;有下载任务时 Tab 徽标提示。
-3. **文本转语音(聊天式界面)** — 底部输入框;每次发送 = 一条气泡(整段文本),
-   发送后输入框清空;历史气泡累积、自动滚到底部展示最新一条;正在读的气泡内
+1. **底部 Tab 布局** — 合成 / 对话 / 设置三个平级 Tab,`IndexedStack` 常驻各页,播放中切换不中断。
+2. **文本转语音(聊天式界面)** — 底部输入框;每次发送 = 一条气泡(整段文本),正在读的气泡内
    **逐词高亮**(卡拉OK式);点击气泡可重新朗读该条。
-4. **朗读控制条** — 播放/暂停、进度条、停止常驻。
-5. **自定义应用级 TTS** — 选择模型、多音色说话人 sid、语速、句间静音、推理线程数、下载镜像。
-6. **文本归一化 + 分词模拟流式 TTS** — sherpa-onnx 无流式 API,采用"归一化 → 分句 → 后台
-   isolate 逐句合成 → 顺序播放"的方式模拟流式效果。
-7. **本地持久化用 flutter_dva** — `settings` / `downloads` 模型 + `ReduxPersistor` 持久化到 SharedPreferences。
+3. **统一设置中心(两级)** — 设置页首页为各大类 ListItem(语音合成 / 语音识别 / VAD /
+   声纹识别 / 大模型 / 通用),点击进入子页配置各自参数 + **各自模型下载**;通用页含清理缓存。
+4. **语音对话(双模式)** — 第 2 Tab「对话」:
+   - **音频模式**:语音 → 离线 ASR → 声纹识别 → 在线 LLM → TTS 语音回复,仅显示最后一轮;
+   - **文本模式**:打字 → 在线 LLM 纯文本回复(不转 TTS),显示全部历史。
+   会话历史为**单一时间线**(多说话人,未知说话人访客模式),存 SQLite 并按时间排序、分页。
+5. **声音克隆** — PocketTTS 零样本克隆音(录 3–10s 参考)。
+6. **声纹识别** — 3D-Speaker 声纹注册(整页 + 圆形居中录音按钮,支持连续注册多个说话人)/ 识别 / 删除。
+7. **多服务商 LLM** — OpenAI 兼容接口,内置 DeepSeek(`deepseek-v4-flash`/`deepseek-v4-pro`)/
+   Moonshot(Kimi)/ 智谱(GLM)/ 通义千问(Qwen)预设,可自定义 baseUrl / apiKey / 模型。
+8. **历史浏览 + 管理** — 对话页 Header 左侧历史入口,分页「加载更早」;长按气泡删除单条消息。
+
+> **隐私说明**:LLM 是唯一联网组件(OpenAI 兼容第三方服务);ASR/TTS/克隆/声纹/VAD 全部离线。
+> API Key 明文存于本地 SharedPreferences(demo 可接受,请勿提交真实 key 到仓库)。
 
 ## 技术栈
 
@@ -25,7 +32,8 @@
 | 分词/分句 | 标点分句 + `jieba_flutter` 长句词边界切块 |
 | 模型下载 | `dio` 流式下载 + `archive` 解压 tar.bz2 |
 | 播放 | `audioplayers`(WAV 顺序播放) |
-| 状态/持久化 | `flutter_dva`(dva 模型 + ReduxPersistor)+ `provider`(运行时 ChangeNotifier) |
+| 状态/持久化 | `flutter_dva`(dva 模型 + ReduxPersistor,配置/克隆/声纹)+ `provider`(运行时 ChangeNotifier) |
+| 会话历史 | `sqflite`(SQLite,`version`+`onUpgrade` 版本化迁移,单一时间线 + 分页) |
 | 应用图标 | `assets/icon/app_icon.svg`(含 TTS 信息)→ PNG,`flutter_launcher_icons` 生成各尺寸 |
 | 集成测试 | `patrol ^4.9.0` |
 
@@ -34,7 +42,7 @@
 
 ## 内置模型目录
 
-下载统一前缀:`https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<id>.tar.bz2`
+下载前缀(按种类):`tts-models`(TTS/克隆)、`asr-models`(ASR/VAD)、`speaker-recongition-models`(声纹)。
 
 | 模型 | 音色 | 大小 | 采样率 | 说明 |
 |---|---|---|---|---|
@@ -53,21 +61,32 @@ flutter pub get
 flutter run            # 需已连接 Android 设备/模拟器(或配置 iOS 模拟器)
 ```
 
-首次使用:模型管理页下载 `Piper 晓雅(int8)` → TTS 设置选择该模型 → 主页输入文本合成。
+首次使用:设置 → 语音合成 下载 `Piper 晓雅(int8)` 并选择 → 主页输入文本合成;
+对话功能在 设置 → 对话初始化(或对话页一键下载三件套)后使用。
 
 ## 代码结构
 
 ```
 lib/
-├── main.dart / app.dart          # 入口(initDva + 依赖装配)与 MainShell
+├── main.dart / app.dart          # 入口(initDva + 依赖装配)
 ├── app_dependencies.dart         # 手工 DI(patrol 测试可注入假实现)
-├── dva/                          # flutter_dva:app_models(settings/downloads) + app_dva(initDva)
-├── models/                       # TtsModel 实体、TtsSettings(持久化走 dva)
-├── data/                         # model_catalog / downloader / extractor / manager / cache
-├── tts/                          # text_normalizer / text_chunker / tts_engine(isolate) / streaming_service
-└── ui/                           # main_shell / synthesize / model_manage / tts_settings / speaking_bubbles_view
+├── components/                   # 全局组件 + 主题令牌
+│   └── theme/                    # app_colors / app_spacing / app_text / app_theme
+├── hooks/                        # 全局 Hook(预留)
+├── mixins/                       # 全局 Mixin(预留)
+├── pages/                        # 页面
+│   ├── main_shell.dart           # 底部导航骨架
+│   ├── synthesize/  conversation/  history/  settings/  clone_voices/  voiceprint/
+├── data/                         # 数据处理
+│   ├── models/                   # TtsModel / TtsSettings / ConversationMessage
+│   ├── dva/                      # flutter_dva:app_models + app_dva
+│   └── (model_catalog / downloader / manager / resolver / extractor / app_paths / conversation_store)
+├── utils/                        # 其他帮助方法 + 服务 + 引擎
+│   ├── engines/                  # tts / vad / asr / speaker / pocket 引擎
+│   └── (services / 文本管线 / wav / isolate_bridge / 播放器 / llm / mic)
+└── l10n/                         # gen-l10n 生成(勿手改)
 test/                             # 单元测试 + widget 冒烟(fakes 见 test/support/)
-patrol_test/                      # Patrol 集成测试
+patrol_test/                      # Patrol 集成测试(app_smoke / conversation / settings)
 scripts/                          # build-android.sh / build-ios.sh / adhocExportOptions.plist
 assets/icon/                      # app_icon.svg(设计源)+ app_icon.png(1024)
 ```
@@ -104,8 +123,9 @@ flutter test
 ```bash
 dart pub global activate patrol_cli
 patrol doctor                       # 校验环境
-patrol test -t patrol_test/app_smoke_test.dart       # 需连接 Android 设备/模拟器
-patrol test -t patrol_test/model_manage_test.dart
+patrol test -t patrol_test/app_smoke_test.dart       # 合成链路(需 Android 设备/模拟器)
+patrol test -t patrol_test/conversation_test.dart    # 对话双模式(音频 + 文本)
+patrol test -t patrol_test/settings_test.dart        # 设置两级结构 + 各分类子页 + 清理缓存
 ```
 
 - Android 原生配置:`android/app/build.gradle.kts` 配了 `PatrolJUnitRunner` +
@@ -156,7 +176,7 @@ bash scripts/build-ios.sh
 ## 平台说明
 
 - **Android**:applicationId 为 `top.ued17.tts`(注:`top.17ued.tts` 不符合 Android 包名规则
-  ——段不能以数字开头,已作此调整);minSdk 由 Flutter 默认(21+);
+  ——段不能以数字开头,已作此调整);minSdk 提至 23(`record` 包要求,语音对话/克隆用麦克风);
   sherpa-onnx 通过 federated 插件打包原生 `.so`。
   Gradle 依赖在国内网络下的下载问题已通过 `android/settings.gradle.kts` 的阿里云镜像与
   `android/gradle/wrapper/gradle-wrapper.properties` 的腾讯镜像解决。

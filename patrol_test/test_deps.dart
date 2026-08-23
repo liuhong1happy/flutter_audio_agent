@@ -5,10 +5,10 @@ library;
 
 import 'dart:io';
 
-import 'package:flutter_tts_demo/app_dependencies.dart';
+import 'package:flutter_tts_demo/data/app_dependencies.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
-import 'package:flutter_tts_demo/tts/text_chunker.dart';
+import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 import '../test/support/fakes.dart';
 
@@ -24,8 +24,12 @@ Future<AppDependencies> buildPatrolTestDeps() async {
     player: FakeAudioPlaybackQueue(
       delayPerSegment: const Duration(milliseconds: 700),
     ),
+    micRecorder: FakeMicRecorder(),
+    conversationPlayer: FakeAudioPlaybackQueue(),
+    conversationStore: MemoryConversationStore(),
     modelsDirProvider: () async => Directory('${tempDir.path}/models'),
     audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    cloneRefsDirProvider: () async => Directory('${tempDir.path}/clone_refs'),
   );
   await deps.init();
 

@@ -37,6 +37,8 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   sherpa_onnx: ^1.13.6
+  record: ^7.1.1
+  sqflite: ^2.4.1
   audioplayers: ^6.8.1
   dio: ^5.11.0
   path_provider: ^2.1.6
@@ -61,6 +63,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   patrol: ^4.9.0
   flutter_launcher_icons: ^0.14.4
+  # 仅测试用:sqflite 的纯 Dart FFI 实现,让 store 单测可在无设备环境跑。
+  sqflite_common_ffi: ^2.3.4
   # 仅测试用:注入 mock 平台使 AudioPlayer 在无音频设备下可构造。
   audioplayers_platform_interface: ^7.2.0
 

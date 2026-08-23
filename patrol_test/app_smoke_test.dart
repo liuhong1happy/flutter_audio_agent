@@ -33,16 +33,16 @@ void main() {
     await takeScreenshot($.tester, '03_normalized_view');
 
     // 状态栏应进入"播放中",说明高亮已随播放推进。
-    await $(RegExp('播放中')).waitUntilVisible(timeout: const Duration(seconds: 15));
+    await $(RegExp('Playing')).waitUntilVisible(timeout: const Duration(seconds: 15));
     await takeScreenshot($.tester, '04_playing_highlight');
 
     // 等待整段播完。
-    await $(RegExp('播放完成')).waitUntilVisible(timeout: const Duration(seconds: 20));
+    await $(RegExp('Finished')).waitUntilVisible(timeout: const Duration(seconds: 20));
     await takeScreenshot($.tester, '05_finished');
 
     // 点击第一个气泡"重新读"该段。
     await $(RegExp('价格十二点五元')).tap();
-    await $(RegExp('播放中')).waitUntilVisible(timeout: const Duration(seconds: 15));
+    await $(RegExp('Playing')).waitUntilVisible(timeout: const Duration(seconds: 15));
     await takeScreenshot($.tester, '06_replay');
 
     await deps.streamingService.disposeAll();

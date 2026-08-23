@@ -10,12 +10,12 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:flutter_tts_demo/app_dependencies.dart';
+import 'package:flutter_tts_demo/data/app_dependencies.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_downloader.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
-import 'package:flutter_tts_demo/tts/text_chunker.dart';
+import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 import 'support/fakes.dart';
 
@@ -77,8 +77,12 @@ Future<({ModelManager manager, _ScriptedDownloader downloader})> _setup({
     chunker: TextChunker(enableJieba: false),
     extractor: const ArchiveExtractor(useCompute: false),
     player: FakeAudioPlaybackQueue(),
+    micRecorder: FakeMicRecorder(),
+    conversationPlayer: FakeAudioPlaybackQueue(),
+    conversationStore: MemoryConversationStore(),
     modelsDirProvider: () async => Directory('${tempDir.path}/models'),
     audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+    cloneRefsDirProvider: () async => Directory('${tempDir.path}/clone_refs'),
   );
   await deps.init();
   addTearDown(() async {
