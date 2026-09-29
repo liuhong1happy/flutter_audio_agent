@@ -117,6 +117,7 @@ class TextFieldSetting extends StatefulWidget {
     required this.onChanged,
     this.obscure = false,
     this.maxLines = 1,
+    this.minLines = 1,
   });
 
   final String label;
@@ -124,6 +125,7 @@ class TextFieldSetting extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final bool obscure;
   final int maxLines;
+  final int minLines;
 
   @override
   State<TextFieldSetting> createState() => _TextFieldSettingState();
@@ -136,6 +138,24 @@ class _TextFieldSettingState extends State<TextFieldSetting> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initial);
+  }
+
+  /// 外部改了 [TextFieldSetting.initial] 时同步到输入框。
+  ///
+  /// 用途:大模型编辑页切服务商时会替换地址与模型,输入框必须跟着变,否则
+  /// "自动填充"用户根本看不见。
+  ///
+  /// **两个守卫都要**:只比 `controller.text` 的话,用户打字过程中父级任何一次
+  /// rebuild(此时传下来的还是旧值)都会把已输入内容覆盖回去。
+  @override
+  void didUpdateWidget(covariant TextFieldSetting oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initial != oldWidget.initial &&
+        widget.initial != _controller.text) {
+      _controller.text = widget.initial;
+      _controller.selection =
+          TextSelection.collapsed(offset: _controller.text.length);
+    }
   }
 
   @override
@@ -152,7 +172,7 @@ class _TextFieldSettingState extends State<TextFieldSetting> {
         controller: _controller,
         obscureText: widget.obscure,
         maxLines: widget.maxLines,
-        minLines: 1,
+        minLines: widget.minLines,
         decoration: InputDecoration(
           labelText: widget.label,
           border: const OutlineInputBorder(),

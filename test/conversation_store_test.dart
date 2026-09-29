@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:flutter_tts_demo/data/models/conversation_message.dart';
+import 'package:flutter_tts_demo/data/app_database.dart';
 import 'package:flutter_tts_demo/data/conversation_store.dart';
 
 import 'support/fakes.dart';
@@ -43,10 +44,11 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     final dir = Directory.systemTemp.createTempSync('sqlite_');
-    final store = SqliteConversationStore('${dir.path}/conversation.db');
+    final db = AppDatabase('${dir.path}/conversation.db');
+    final store = SqliteConversationStore(db);
     await store.open();
     addTearDown(() async {
-      await store.close();
+      await db.close();
       dir.deleteSync(recursive: true);
     });
 

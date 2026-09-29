@@ -1,0 +1,11 @@
+# cargokit 的**用户级**选项。cargokit 会从工程根目录**向上**查找本文件,
+# 所以必须放在工程根 —— 放在插件里是无效的(插件不是工程根的祖先)。
+#
+# `use_precompiled_binaries: false`:强制**从源码编译**。
+# 原因(见 TODO.md 坑 19 与 third_party/flutter_embedder/PATCHES.md):
+# 走预编译那条路时,产物虽下载成功却没有被放进 APK(输出目录落到了插件源码树里的空目录),
+# 且只下到 arm64(模拟器要的 x86_64 不在),排查成本高于直接本机编译。
+# 本机已装 Rust(GNU 工具链)+ MinGW + Android NDK,故改为全 ABI 源码编译,一次性绕开这两个坑。
+use_precompiled_binaries: false
+# verbose_logging 仅在排查 cargokit 行为时临时打开(会打印每个 rustup/cargo 调用)。
+verbose_logging: false

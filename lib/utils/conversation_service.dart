@@ -22,6 +22,11 @@ import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
 import 'package:flutter_tts_demo/utils/llm_client.dart';
 import 'package:flutter_tts_demo/utils/llm_service.dart';
+import 'package:flutter_tts_demo/data/models/memory_item.dart';
+import 'package:flutter_tts_demo/utils/memory/context_assembler.dart';
+import 'package:flutter_tts_demo/utils/memory/knowledge_service.dart';
+import 'package:flutter_tts_demo/utils/memory/memory_service.dart';
+import 'package:flutter_tts_demo/utils/memory/session_memory_service.dart';
 import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/data/models/tts_settings.dart';
 import 'package:flutter_tts_demo/utils/sequential_audio_player.dart';
@@ -69,6 +74,10 @@ class ConversationService extends ChangeNotifier {
     required ConversationStore store,
     VadEngine? vad,
     AudioPlaybackQueue? player,
+    KnowledgeService? knowledge,
+    MemoryService? memory,
+    SessionMemoryService? sessionMemory,
+    ContextAssembler? assembler,
   })  : _modelManager = modelManager,
         _settings = settings,
         _asr = asr,
@@ -80,7 +89,11 @@ class ConversationService extends ChangeNotifier {
         _streamingService = streamingService,
         _mic = mic,
         _store = store,
-        _vad = vad ?? VadEngine() {
+        _vad = vad ?? VadEngine(),
+        _knowledge = knowledge,
+        _memory = memory,
+        _sessionMemory = sessionMemory,
+        _assembler = assembler ?? ContextAssembler() {
     _vad.onSegment = _onVadSegment;
     _player = player ?? SequentialAudioPlayer();
     _player.onQueueDrained = _onPlaybackDrained;
@@ -98,7 +111,24 @@ class ConversationService extends ChangeNotifier {
   final MicRecorder _mic;
   final ConversationStore _store;
   final VadEngine _vad;
+
+  /// 知识库检索(可空:未接入时退化为 v1.0.1 行为,不注入任何片段)。
+  final KnowledgeService? _knowledge;
+
+  /// 长期记忆(可空)。
+  final MemoryService? _memory;
+
+  /// 短期记忆/会话分段(可空)。
+  final SessionMemoryService? _sessionMemory;
+
+  /// 上下文编排器(预算与裁剪策略都封在里面)。
+  final ContextAssembler _assembler;
+
   late final AudioPlaybackQueue _player;
+
+  /// 最近一次编排的诊断(供 UI 显示"引用了 N 条资料"/排查未注入原因)。
+  AssembledContext? _lastContext;
+  AssembledContext? get lastContext => _lastContext;
 
   static const String _defaultSystemPrompt =
       '你是一个友好的中文语音助手。请用简洁自然、适合朗读的中文口语回答,不要使用列表或表情符号。';
@@ -151,7 +181,24 @@ class ConversationService extends ChangeNotifier {
   /// 正在朗读的片段下标(-1 = 无)。
   int get currentSegment => _currentSegmentIndex;
 
+  /// 文本模式就绪:只需配好大模型。
+  ///
+  /// [sendText] 只碰 LLM 与 SQLite —— 不用 VAD/ASR/TTS/声纹/麦克风,所以文本
+  /// 模式**一个本地模型都不需要下载**。
+  bool get isReadyForTextMode => _settings.isLlmConfigured;
+
+  /// 音频模式就绪:三件套(见 [isReadyForConversation])+ 大模型。
+  ///
+  /// 注意:门禁只在 UI 层,没有加进 [start()] —— `start()` 保持"模型不齐才
+  /// 拒绝、未配 Key 则起得来、命中 LLM 时才报错"的既有行为,那条运行时错误
+  /// 路径有测试覆盖。
+  bool get isReadyForAudioMode =>
+      isReadyForConversation && _settings.isLlmConfigured;
+
   /// 是否已具备开始对话的条件(三件套就绪 + 至少一个发音可用)。
+  ///
+  /// **不含大模型条件** —— 那是模式相关的,见 [isReadyForTextMode] /
+  /// [isReadyForAudioMode]。
   bool get isReadyForConversation {
     final vad = ModelCatalog.byKind(ModelKind.vad);
     if (vad == null || !_modelManager.isDownloaded(vad.id)) return false;
@@ -333,7 +380,7 @@ class ConversationService extends ChangeNotifier {
       _messages.add(userMsg);
 
       // LLM 流式(纯文本)。
-      final messages = _buildLlmMessages();
+      final messages = await _buildLlmMessages();
       final cancel = CancelToken();
       _cancelToken = cancel;
       final buffer = StringBuffer();
@@ -369,6 +416,7 @@ class ConversationService extends ChangeNotifier {
       _messages.add(assistantMsg);
       _phase = ConversationPhase.idle;
       notifyListeners();
+      _afterTurn();
     } catch (e) {
       _lastError = '$e';
       _phase = ConversationPhase.error;
@@ -377,14 +425,29 @@ class ConversationService extends ChangeNotifier {
   }
 
   /// 落库并返回带自增 id 的消息。
+  ///
+  /// **会话分段在这里统一补上**,而不是让每个调用点各自传 ——
+  /// 音频模式与文本模式各有多个落库点,漏一处就会出现"这条消息不属于任何会话",
+  /// 那样它永远不会被摘要(而用户完全看不出来)。
   Future<ConversationMessage> _persist(ConversationMessage m) async {
-    final id = await _store.insert(m);
+    final sessionId =
+        m.sessionId ?? _sessionMemory?.sessionIdAt(m.createdAt);
+    final withSession = ConversationMessage(
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      speakerName: m.speakerName,
+      createdAt: m.createdAt,
+      sessionId: sessionId,
+    );
+    final id = await _store.insert(withSession);
     return ConversationMessage(
       id: id,
       role: m.role,
       content: m.content,
       speakerName: m.speakerName,
       createdAt: m.createdAt,
+      sessionId: sessionId,
     );
   }
 
@@ -479,7 +542,7 @@ class ConversationService extends ChangeNotifier {
       _streamingText = '';
       notifyListeners();
 
-      final messages = _buildLlmMessages();
+      final messages = await _buildLlmMessages();
       final cancel = CancelToken();
       _cancelToken = cancel;
       final buffer = StringBuffer();
@@ -516,6 +579,7 @@ class ConversationService extends ChangeNotifier {
       ));
       _messages.add(assistantMsg);
       notifyListeners();
+      _afterTurn();
 
       // 7. 合成播放回复。
       await _speakReply(reply);
@@ -527,38 +591,120 @@ class ConversationService extends ChangeNotifier {
     }
   }
 
-  List<LlmMessage> _buildLlmMessages() {
-    final out = <LlmMessage>[];
+  /// 最近一条**用户**消息的文本(检索查询用它)。
+  String _lastUserText() {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].role == ConversationRole.user) {
+        return _messages[i].content;
+      }
+    }
+    return '';
+  }
+
+  /// 每轮结束后的收尾:**一律不阻塞主流程**,且全部失败静默。
+  ///
+  /// 这里放的是"增强"类工作(滚动摘要、记忆抽取)。它们失败只该少一点记忆,
+  /// 绝不该让用户说不下去话 —— 故都是 fire-and-forget。
+  void _afterTurn() {
+    final sm = _sessionMemory;
+    final sid = sm?.currentSessionId;
+    if (sm != null && sid != null) {
+      unawaited(sm.maybeSummarize(sessionId: sid));
+    }
+
+    final mem = _memory;
+    // 开关关闭就不抽取 —— 抽取会消耗用户自付的 API token。
+    if (mem != null && _settings.memoryEnabled) {
+      mem.noteTurn();
+      if (mem.shouldExtract) {
+        // 只喂最近若干轮:更早的内容已经进摘要了,重复喂既费 token 也易抽重。
+        final from = _messages.length > _extractWindow
+            ? _messages.length - _extractWindow
+            : 0;
+        unawaited(mem.extractFrom(
+          speaker: _currentSpeaker,
+          recentMessages: _messages.sublist(from),
+        ));
+      }
+    }
+  }
+
+  /// 记忆抽取时喂给 LLM 的最近消息条数。
+  static const int _extractWindow = 10;
+
+  /// 构建发给 LLM 的消息。
+  ///
+  /// 由 [ContextAssembler] 统一做预算与裁剪:知识库片段、长期记忆、会话摘要、
+  /// 最近若干轮都在这里汇合。**任何检索失败都只是"不注入"**,绝不影响对话。
+  Future<List<LlmMessage>> _buildLlmMessages() async {
     final base = _settings.llmSystemPrompt.trim().isEmpty
         ? _defaultSystemPrompt
         : _settings.llmSystemPrompt.trim();
     final profile =
         _currentSpeaker == null ? null : _voiceprint.profileOf(_currentSpeaker!);
 
-    final sys = StringBuffer(base);
-    if (_currentSpeaker == null) {
-      sys.write('\n当前说话人: 未知用户');
-    } else {
-      sys.write('\n当前说话人: $_currentSpeaker');
-      if (profile != null && profile.note.trim().isNotEmpty) {
-        sys.write('\n说话人备注: ${profile.note.trim()}');
-      }
-    }
-    out.add(LlmMessage(role: 'system', content: sys.toString()));
-
     // 近期历史(单一时间线),用户消息带说话人前缀。
     final recent = _messages.length <= _llmContextLimit
         ? _messages
         : _messages.sublist(_messages.length - _llmContextLimit);
-    for (final m in recent) {
-      if (m.role == ConversationRole.user) {
-        final who = m.speakerName ?? '未知';
-        out.add(LlmMessage(role: 'user', content: '[$who] ${m.content}'));
-      } else {
-        out.add(LlmMessage(role: 'assistant', content: m.content));
+    final recentMessages = <LlmMessage>[
+      for (final m in recent)
+        if (m.role == ConversationRole.user)
+          LlmMessage(role: 'user', content: '[${m.speakerName ?? '未知'}] ${m.content}')
+        else
+          LlmMessage(role: 'assistant', content: m.content),
+    ];
+
+    final query = _lastUserText();
+
+    // ③ 知识库(开关关闭 / 空查询 / 检索失败 ⇒ 空列表)
+    var knowledge = const <ContextSnippet>[];
+    final kb = _knowledge;
+    if (_settings.kbEnabled && kb != null && query.trim().isNotEmpty) {
+      final hits = await kb.search(query);
+      if (hits.isNotEmpty) {
+        final titles = {for (final d in kb.documents) d.id: d.title};
+        knowledge = [
+          for (final h in hits)
+            if ((h.text ?? '').trim().isNotEmpty)
+              ContextSnippet(
+                text: h.text!,
+                label: h.payload is int ? titles[h.payload as int] : null,
+              ),
+        ];
       }
     }
-    return out;
+
+    // ④ 长期记忆(未知说话人 ⇒ MemoryService 内部直接返回空,这里无需再判)
+    var memories = const <MemoryItem>[];
+    final mem = _memory;
+    if (mem != null && query.trim().isNotEmpty) {
+      memories = await mem.retrieve(
+        speaker: _currentSpeaker,
+        query: query,
+        topK: _settings.memoryTopK,
+      );
+    }
+
+    // ⑤ 会话摘要
+    String? summary;
+    final sm = _sessionMemory;
+    final sid = sm?.currentSessionId;
+    if (sm != null && sid != null) {
+      summary = await sm.summaryFor(sid);
+    }
+
+    final ctx = _assembler.assemble(
+      systemPrompt: base,
+      speakerName: _currentSpeaker,
+      speakerNote: profile?.note,
+      knowledge: knowledge,
+      memories: memories,
+      sessionSummary: summary,
+      recentMessages: recentMessages,
+    );
+    _lastContext = ctx;
+    return ctx.messages;
   }
 
   // ── 合成播放 ──────────────────────────────────────────────────────

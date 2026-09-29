@@ -12,6 +12,8 @@ library;
 
 import 'package:flutter_dva/flutter_dva.dart';
 
+import 'package:flutter_tts_demo/data/models/llm_config.dart';
+
 /// 持久化的 TTS/对话设置状态。
 class SettingsState extends DvaState {
   String? selectedModelId;
@@ -26,11 +28,26 @@ class SettingsState extends DvaState {
   String llmApiKey = '';
   String llmModel = 'deepseek-v4-flash';
   String llmSystemPrompt = '';
+
+  /// 大模型配置列表(每条一套 服务商/地址/Key/模型/提示词)。
+  ///
+  /// 上面四个扁平字段是**旧版的单配置存储**,现在只作为**迁移读取源**保留
+  /// (老用户升级时用它们种出第一条配置);新的写入一律走这两个字段,
+  /// 避免出现两份真相。
+  List<Map<String, dynamic>> llmConfigs = [];
+  String? activeLlmConfigId;
   String? asrModelId;
   double voiceprintThreshold = 0.6;
   String? voiceprintModelId;
   bool voiceprintGateEnabled = false;
   bool requireAuthForEnroll = true;
+  String? embeddingModelId;
+  bool kbEnabled = true;
+  int kbTopK = 4;
+  double kbScoreThreshold = 0.45;
+  bool memoryEnabled = true;
+  int memoryExtractInterval = 4;
+  int memoryTopK = 6;
   double vadThreshold = 0.5;
   double vadMinSilence = 0.5;
   double vadMaxSpeech = 15.0;
@@ -52,12 +69,24 @@ class SettingsState extends DvaState {
     llmApiKey = json['llmApiKey'] as String? ?? '';
     llmModel = json['llmModel'] as String? ?? 'deepseek-v4-flash';
     llmSystemPrompt = json['llmSystemPrompt'] as String? ?? '';
+    llmConfigs = (json['llmConfigs'] as List<dynamic>?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+    activeLlmConfigId = json['activeLlmConfigId'] as String?;
     asrModelId = json['asrModelId'] as String?;
     voiceprintThreshold =
         (json['voiceprintThreshold'] as num?)?.toDouble() ?? 0.6;
     voiceprintModelId = json['voiceprintModelId'] as String?;
     voiceprintGateEnabled = json['voiceprintGateEnabled'] as bool? ?? false;
     requireAuthForEnroll = json['requireAuthForEnroll'] as bool? ?? true;
+    embeddingModelId = json['embeddingModelId'] as String?;
+    kbEnabled = json['kbEnabled'] as bool? ?? true;
+    kbTopK = (json['kbTopK'] as num?)?.toInt() ?? 4;
+    kbScoreThreshold = (json['kbScoreThreshold'] as num?)?.toDouble() ?? 0.45;
+    memoryEnabled = json['memoryEnabled'] as bool? ?? true;
+    memoryExtractInterval = (json['memoryExtractInterval'] as num?)?.toInt() ?? 4;
+    memoryTopK = (json['memoryTopK'] as num?)?.toInt() ?? 6;
     vadThreshold = (json['vadThreshold'] as num?)?.toDouble() ?? 0.5;
     vadMinSilence = (json['vadMinSilence'] as num?)?.toDouble() ?? 0.5;
     vadMaxSpeech = (json['vadMaxSpeech'] as num?)?.toDouble() ?? 15.0;
@@ -80,11 +109,20 @@ class SettingsState extends DvaState {
         'llmApiKey': llmApiKey,
         'llmModel': llmModel,
         'llmSystemPrompt': llmSystemPrompt,
+        'llmConfigs': llmConfigs,
+        'activeLlmConfigId': activeLlmConfigId,
         'asrModelId': asrModelId,
         'voiceprintThreshold': voiceprintThreshold,
         'voiceprintModelId': voiceprintModelId,
         'voiceprintGateEnabled': voiceprintGateEnabled,
         'requireAuthForEnroll': requireAuthForEnroll,
+        'embeddingModelId': embeddingModelId,
+        'kbEnabled': kbEnabled,
+        'kbTopK': kbTopK,
+        'kbScoreThreshold': kbScoreThreshold,
+        'memoryEnabled': memoryEnabled,
+        'memoryExtractInterval': memoryExtractInterval,
+        'memoryTopK': memoryTopK,
         'vadThreshold': vadThreshold,
         'vadMinSilence': vadMinSilence,
         'vadMaxSpeech': vadMaxSpeech,
@@ -167,6 +205,29 @@ class SettingsModel extends Model<SettingsState> {
         s.setState(st);
         return s;
       },
+      // 列表与启用项一起写(一次 dispatch),并把启用项**镜像**进那四个旧的
+      // 扁平字段:它们现在只被 resolveLlmConfigs 当作迁移输入读,镜像一下
+      // 既让降级回旧版本仍能读到当前配置,也让 persistence_test 的断言继续
+      // 有意义。这里是唯一的写点。
+      'setLlmConfigs': (s, a) {
+        final st = s.getState() as SettingsState;
+        final payload = (a.payload as Map?)?.cast<String, dynamic>() ?? const {};
+        st.llmConfigs = (payload['items'] as List<dynamic>?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ??
+            [];
+        st.activeLlmConfigId = payload['activeId'] as String?;
+        final active = st.llmConfigs.firstWhere(
+          (m) => m['id'] == st.activeLlmConfigId,
+          orElse: () => const {},
+        );
+        st.llmBaseUrl = active['baseUrl'] as String? ?? kDefaultLlmBaseUrl;
+        st.llmApiKey = active['apiKey'] as String? ?? '';
+        st.llmModel = active['model'] as String? ?? kDefaultLlmModel;
+        st.llmSystemPrompt = active['systemPrompt'] as String? ?? '';
+        s.setState(st);
+        return s;
+      },
       'setAsrModelId': (s, a) {
         final st = s.getState() as SettingsState;
         st.asrModelId = a.payload as String?;
@@ -194,6 +255,48 @@ class SettingsModel extends Model<SettingsState> {
       'setRequireAuthForEnroll': (s, a) {
         final st = s.getState() as SettingsState;
         st.requireAuthForEnroll = a.payload as bool? ?? true;
+        s.setState(st);
+        return s;
+      },
+      'setEmbeddingModelId': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.embeddingModelId = a.payload as String?;
+        s.setState(st);
+        return s;
+      },
+      'setKbEnabled': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.kbEnabled = a.payload as bool? ?? true;
+        s.setState(st);
+        return s;
+      },
+      'setKbTopK': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.kbTopK = (a.payload as num?)?.toInt() ?? 4;
+        s.setState(st);
+        return s;
+      },
+      'setKbScoreThreshold': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.kbScoreThreshold = (a.payload as num?)?.toDouble() ?? 0.45;
+        s.setState(st);
+        return s;
+      },
+      'setMemoryEnabled': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.memoryEnabled = a.payload as bool? ?? true;
+        s.setState(st);
+        return s;
+      },
+      'setMemoryExtractInterval': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.memoryExtractInterval = (a.payload as num?)?.toInt() ?? 4;
+        s.setState(st);
+        return s;
+      },
+      'setMemoryTopK': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.memoryTopK = (a.payload as num?)?.toInt() ?? 6;
         s.setState(st);
         return s;
       },

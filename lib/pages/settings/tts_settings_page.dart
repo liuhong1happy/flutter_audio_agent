@@ -8,7 +8,9 @@ import 'package:flutter_tts_demo/l10n/app_localizations.dart';
 import 'components/settings_widgets.dart';
 import 'sections/asr_section.dart';
 import 'sections/general_section.dart';
+import 'sections/knowledge_section.dart';
 import 'sections/llm_section.dart';
+import 'sections/memory_section.dart';
 import 'sections/tts_section.dart';
 import 'sections/vad_section.dart';
 import 'sections/voiceprint_section.dart';
@@ -46,6 +48,16 @@ class TtsSettingsPage extends StatelessWidget {
             icon: Icons.fingerprint,
             title: l10n.sectionVoiceprint,
             onTap: () => _push(context, const VoiceprintSection()),
+          ),
+          CategoryTile(
+            icon: Icons.menu_book_outlined,
+            title: l10n.sectionKnowledge,
+            onTap: () => _push(context, const KnowledgeSection()),
+          ),
+          CategoryTile(
+            icon: Icons.psychology_outlined,
+            title: l10n.sectionMemory,
+            onTap: () => _push(context, const MemorySection()),
           ),
           CategoryTile(
             icon: Icons.smart_toy_outlined,

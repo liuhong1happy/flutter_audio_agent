@@ -83,6 +83,58 @@ void main() {
     expect(deps.conversationService.isReadyForConversation, isTrue);
   });
 
+  test('就绪判定按模式区分:文本模式只用大模型,一个本地模型都不需要', () async {
+    final deps = await _deps();
+    final svc = deps.conversationService;
+
+    // 什么都没配:两种模式都不就绪。
+    expect(svc.isReadyForTextMode, isFalse);
+    expect(svc.isReadyForAudioMode, isFalse);
+
+    // 只配大模型 → 文本模式立刻可用,音频模式仍不行(缺三件套)。
+    await deps.settings.setLlmApiKey('k');
+    expect(svc.isReadyForTextMode, isTrue);
+    expect(svc.isReadyForAudioMode, isFalse);
+    expect(svc.isReadyForConversation, isFalse, reason: '三件套仍未就绪');
+
+    // 补齐三件套 → 音频模式也就绪。
+    await svc.downloadInitialModels(null);
+    expect(svc.isReadyForAudioMode, isTrue);
+    expect(svc.isReadyForConversation, isTrue);
+  });
+
+  test('三件套齐但未配大模型:音频模式不就绪(两种模式都需要大模型)', () async {
+    final deps = await _deps();
+    await deps.conversationService.downloadInitialModels(null);
+
+    expect(deps.conversationService.isReadyForConversation, isTrue,
+        reason: '模型维度已就绪');
+    expect(deps.conversationService.isReadyForAudioMode, isFalse,
+        reason: '音频模式还要求大模型');
+    expect(deps.conversationService.isReadyForTextMode, isFalse);
+
+    await deps.settings.setLlmApiKey('k');
+    expect(deps.conversationService.isReadyForAudioMode, isTrue);
+  });
+
+  test('文本模式零模型也能跑通 sendText', () async {
+    final llm = FakeLlmClient(chunks: ['文本回复']);
+    final deps = await _deps(llm: llm);
+
+    // 刻意不下载任何模型。
+    await deps.settings.setLlmApiKey('k');
+    expect(deps.conversationService.isReadyForTextMode, isTrue);
+
+    await deps.conversationService.sendText('你好');
+    await _waitFor(
+      () => deps.conversationService.phase == ConversationPhase.idle,
+    );
+
+    expect(llm.capturedMessages, isNotEmpty);
+    final fakeEngine = deps.engine as FakeTtsEngine;
+    expect(fakeEngine.generatedTexts, isEmpty, reason: '文本模式不转 TTS');
+  });
+
   test('VAD 段驱动访客对话:转写 → LLM → 回复消息(访客不泄身份)', () async {
     final asr = FakeAsrEngine()..nextText = '你好';
     final llm = FakeLlmClient(chunks: ['你好']);

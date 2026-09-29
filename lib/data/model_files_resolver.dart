@@ -52,11 +52,18 @@ class ResolvedModelPaths {
     this.ruleFsts = const [],
     this.kind = ModelKind.tts,
     this.pocket,
+    this.tokenizerJsonPath,
   });
 
   final String rootDir;
   final String? modelPath;
   final String? tokensPath;
+
+  /// 文本嵌入用的 HF 分词器文件(`tokenizer.json`)。
+  ///
+  /// 与 ASR 的 [tokensPath] 是两回事:那个是 sherpa 的 `tokens.txt`,
+  /// 这个是 HuggingFace `tokenizers` 格式的 JSON,由 `flutter_embedder` 内部解析。
+  final String? tokenizerJsonPath;
 
   /// VITS:单个 lexicon.txt;Kokoro:`lexicon-us-en.txt,lexicon-zh.txt`。
   final String? lexiconPath;
@@ -87,6 +94,8 @@ class ResolvedModelPaths {
         return modelPath != null;
       case ModelKind.pocket:
         return pocket?.isComplete ?? false;
+      case ModelKind.embedding:
+        return modelPath != null && tokenizerJsonPath != null;
     }
   }
 }
@@ -124,6 +133,8 @@ class ModelFilesResolver {
         return _resolveRaw(model, rootDir, find);
       case ModelKind.pocket:
         return _resolvePocket(model, rootDir, find);
+      case ModelKind.embedding:
+        return _resolveEmbedding(model, rootDir, find);
     }
   }
 
@@ -236,6 +247,34 @@ class ModelFilesResolver {
     return ResolvedModelPaths(
       rootDir: rootDir,
       modelPath: modelPath,
+      kind: model.kind,
+    );
+  }
+
+  /// 文本嵌入:需要 onnx + tokenizer.json。
+  ///
+  /// ⚠️ **断言不出现 `_data` 伴生文件**:`onnx-community` 那份模型是外置数据拆分格式
+  /// (`.onnx` 仅 168KB 的图 + `.onnx_data` 23.8MB 的权重),只下 `.onnx` 会在加载时
+  /// 失败且报错难读。我们一律用 `Xenova` 的单文件版;若目录里出现了 `_data` 文件,
+  /// 说明模型来源被换成了拆分版 —— 这里直接判为**不完整**,让上层报错而不是带到运行时。
+  ResolvedModelPaths _resolveEmbedding(
+    TtsModel model,
+    String rootDir,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    final hasExternalData = find(predicate: (name) => name.endsWith('.onnx_data')) != null;
+    if (hasExternalData) {
+      return ResolvedModelPaths(rootDir: rootDir, kind: model.kind);
+    }
+    final modelPath = find(
+          predicate: (name) => name == 'model_quantized.onnx',
+        ) ??
+        find(predicate: (name) => name.endsWith('.onnx'));
+    final tokenizerJsonPath = find(predicate: (name) => name == 'tokenizer.json');
+    return ResolvedModelPaths(
+      rootDir: rootDir,
+      modelPath: modelPath,
+      tokenizerJsonPath: tokenizerJsonPath,
       kind: model.kind,
     );
   }

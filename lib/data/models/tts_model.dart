@@ -28,12 +28,44 @@ enum ModelKind {
 
   /// 语音活动检测(Silero VAD)。
   vad,
+
+  /// **文本**嵌入(知识库/记忆检索用,如 bge-small-zh-v1.5)。
+  ///
+  /// ⚠️ 与 [speaker] **不是一回事**:那个是"音频→声纹向量",这个是"文本→语义向量"。
+  /// 名字相近,勿混。
+  embedding,
 }
 
-/// 下载格式:tar.bz2 需解压;rawFile 为单个裸文件(如 silero_vad.onnx)。
+/// 下载格式:tar.bz2 需解压;rawFile 为裸文件(单文件用 `url`+`rawFileName`,
+/// 多文件用 `rawFiles`)。
 enum ModelDownloadFormat {
   tarBz2,
   rawFile,
+}
+
+/// 多文件 raw 下载中的一个成员。
+///
+/// 存在的理由:文本嵌入模型需要 **onnx + tokenizer.json + vocab.txt + config.json**
+/// 一起落盘,而原先的 `rawFile` 只支持单文件(silero_vad.onnx 那种)。
+@immutable
+class ModelRawFile {
+  const ModelRawFile({
+    required this.remotePath,
+    required this.fileName,
+    required this.sizeBytes,
+  });
+
+  /// 远端路径(含目录),如 `onnx/model_quantized.onnx`。
+  final String remotePath;
+
+  /// 落盘后的**扁平**文件名,如 `model_quantized.onnx`。
+  ///
+  /// 扁平化是刻意的:单文件 ONNX 没有外置数据依赖,不需要保留远端目录层级;
+  /// 而 `model_quantized.onnx` 若与 `model_quantized.onnx_data` 同名同目录才是
+  /// 必须的(那份拆分格式我们**不用**,见 [ModelRawFile] 的选型说明)。
+  final String fileName;
+
+  final int sizeBytes;
 }
 
 /// 模型目录中的一个可下载条目。
@@ -51,6 +83,7 @@ class TtsModel {
     this.kind = ModelKind.tts,
     this.downloadFormat = ModelDownloadFormat.tarBz2,
     this.rawFileName,
+    this.rawFiles,
     this.family = TtsModelFamily.vits,
     this.speakers = 1,
     this.sampleRate = 16000,
@@ -80,7 +113,23 @@ class TtsModel {
   final ModelDownloadFormat downloadFormat;
 
   /// 当 [downloadFormat] 为 rawFile 时的落盘文件名,如 `silero_vad.onnx`。
+  ///
+  /// 单文件场景用这个;**多文件用 [rawFiles]**,两者取其一。
   final String? rawFileName;
+
+  /// 多文件 raw 下载清单。非空时优先于 [url]/[rawFileName]。
+  final List<ModelRawFile>? rawFiles;
+
+  /// 该条目的总下载体积(多文件求和)。
+  int get totalSizeBytes {
+    final files = rawFiles;
+    if (files == null || files.isEmpty) return tarBz2SizeBytes;
+    var sum = 0;
+    for (final f in files) {
+      sum += f.sizeBytes;
+    }
+    return sum;
+  }
 
   /// 内置说话人数量(引擎的 sid 取值范围 0..speakers-1);非 TTS 为 0。
   final int speakers;
@@ -96,7 +145,8 @@ class TtsModel {
   /// 是否支持中英混读。
   final bool multilingual;
 
-  String get sizeLabel => _formatBytes(tarBz2SizeBytes);
+  /// 展示用体积(多文件条目自动求和)。
+  String get sizeLabel => _formatBytes(totalSizeBytes);
 
   static String _formatBytes(int bytes) {
     if (bytes >= 1024 * 1024) {

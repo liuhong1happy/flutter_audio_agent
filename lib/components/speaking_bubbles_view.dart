@@ -80,7 +80,15 @@ class _SpeakingBubblesViewState extends State<SpeakingBubblesView> {
   Widget build(BuildContext context) {
     if (widget.utterances.isEmpty) {
       return Center(
-        child: Text(AppLocalizations.of(context).bubblesEmptyHint),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            AppLocalizations.of(context).bubblesEmptyHint,
+            // 空状态提示要淡:caption 自身是 inkPrimary(全强度),必须显式降级。
+            style: AppText.tertiary(AppText.caption),
+            textAlign: TextAlign.center,
+          ),
+        ),
       );
     }
     return ListView.builder(

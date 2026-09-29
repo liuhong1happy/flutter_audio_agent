@@ -15,6 +15,7 @@ class ConversationMessage {
     required this.content,
     this.speakerName,
     required this.createdAt,
+    this.sessionId,
   });
 
   /// 数据库自增 id(未持久化时为 null)。
@@ -28,4 +29,10 @@ class ConversationMessage {
 
   /// 毫秒时间戳。
   final int createdAt;
+
+  /// 所属会话段(null = 引入会话分段之前的旧数据)。
+  ///
+  /// 会话边界不是"清空历史"(那是**删数据**的语义),而是"停了一会儿再聊" ——
+  /// 由 [SessionMemoryService] 按空闲时长判定。短期记忆的摘要按会话段隔离。
+  final String? sessionId;
 }

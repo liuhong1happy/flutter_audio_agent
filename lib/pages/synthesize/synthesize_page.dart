@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_tts_demo/components/speaking_bubbles_view.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/data/models/tts_settings.dart';
 import 'package:flutter_tts_demo/l10n/app_localizations.dart';
 import 'package:flutter_tts_demo/utils/tts_streaming_service.dart';
@@ -14,6 +15,7 @@ import 'package:flutter_tts_demo/utils/tts_streaming_service.dart';
 import 'components/input_bar.dart';
 import 'components/playback_control_bar.dart';
 import 'components/status_capsule.dart';
+import 'sections/synth_init_card.dart';
 import 'utils/phase_helpers.dart';
 
 class SynthesizePage extends StatefulWidget {
@@ -33,9 +35,22 @@ class _SynthesizePageState extends State<SynthesizePage> {
   void initState() {
     super.initState();
     // 进入合成页时预加载所选模型(已加载则忽略)。
+    // 无模型时 prepareModel 内部自己会安全返回,不必额外判断。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<TtsStreamingService>().prepareModel();
     });
+  }
+
+  /// 下载目标模型,成功后启用它(卡片消失即是"启用成功"的反馈)。
+  Future<void> _downloadAndEnable(
+    ModelManager manager,
+    TtsSettings settings,
+    TtsModel target,
+  ) async {
+    await manager.downloadModel(target);
+    if (manager.isDownloaded(target.id)) {
+      await settings.selectModel(target.id);
+    }
   }
 
   @override
@@ -90,6 +105,11 @@ class _SynthesizePageState extends State<SynthesizePage> {
     final modelReady =
         selectedModel != null && modelManager.isDownloaded(selectedModel.id);
 
+    // 没有可用模型时,目标是"所选模型"(选了但没下载),否则推荐默认模型。
+    final target = selectedModel ??
+        ModelCatalog.byId(kDefaultSynthModelId) ??
+        ModelCatalog.all.first;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(l10n.synthesizeTab),
@@ -101,40 +121,50 @@ class _SynthesizePageState extends State<SynthesizePage> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SpeakingBubblesView(
-                utterances: service.utterances,
-                activeIndex: service.activeIndex,
-                currentWordIndex: service.currentWordIndex,
-                autoScroll: settings.autoScroll,
-                onReplay: (i) => service.replayUtterance(i),
+        child: modelReady
+            ? Column(
+                children: [
+                  Expanded(
+                    child: SpeakingBubblesView(
+                      utterances: service.utterances,
+                      activeIndex: service.activeIndex,
+                      currentWordIndex: service.currentWordIndex,
+                      autoScroll: settings.autoScroll,
+                      onReplay: (i) => service.replayUtterance(i),
+                    ),
+                  ),
+                  PlaybackControlBar(
+                    service: service,
+                    onTogglePlayPause: () async {
+                      if (service.phase == StreamingPhase.paused) {
+                        await service.resume();
+                      } else if (service.phase == StreamingPhase.playing ||
+                          service.phase == StreamingPhase.synthesizing) {
+                        await service.pause();
+                      }
+                    },
+                    onStop: () => service.stop(),
+                  ),
+                  InputBar(
+                    controller: _textController,
+                    onChange: () => setState(() {}),
+                    isEmpty: _textController.text.isEmpty,
+                    active: isActiveStreamingPhase(service.phase),
+                    loading: service.modelLoading,
+                    onSend: () => _onSpeakPressed(service),
+                    onStop: () => service.stop(),
+                  ),
+                ],
+              )
+            : SynthInitCard(
+                target: target,
+                selected: selectedModel != null,
+                state: modelManager.stateOf(target),
+                onDownload: () =>
+                    _downloadAndEnable(modelManager, settings, target),
+                onCancel: () => modelManager.cancelDownload(target),
+                onOpenSettings: () => widget.onNavigateToSettings?.call(),
               ),
-            ),
-            PlaybackControlBar(
-              service: service,
-              onTogglePlayPause: () async {
-                if (service.phase == StreamingPhase.paused) {
-                  await service.resume();
-                } else if (service.phase == StreamingPhase.playing ||
-                    service.phase == StreamingPhase.synthesizing) {
-                  await service.pause();
-                }
-              },
-              onStop: () => service.stop(),
-            ),
-            InputBar(
-              controller: _textController,
-              onChange: () => setState(() {}),
-              isEmpty: _textController.text.isEmpty,
-              active: isActiveStreamingPhase(service.phase),
-              loading: service.modelLoading,
-              onSend: () => _onSpeakPressed(service),
-              onStop: () => service.stop(),
-            ),
-          ],
-        ),
       ),
     );
   }

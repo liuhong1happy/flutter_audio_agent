@@ -2,7 +2,12 @@
 
 > 更新日期:2026-09-29
 > 本文件是**自足交接文档**:包含功能清单、实施追踪、以及全部已核实的实现知识(sherpa_onnx API 签名、模型 URL/体积、现有代码地图、设计决策、坑位)。在任意新机器上仅凭本文件即可实施,无需本机缓存或记忆。
-> 关联:详细设计现状见 `docs/敏捷开发/v1.0.1 APP设计内容.md`(当前版本)、`docs/敏捷开发/v1.0.0 APP设计内容.md`(纯 TTS 基线)、`README.md`。
+> 关联:详细设计现状见 `docs/敏捷开发/v1.0.2 APP设计内容.md`(**规划中,下一版本**)、
+> `docs/敏捷开发/v1.0.1 APP设计内容.md`(当前已发布版本)、`docs/敏捷开发/v1.0.0 APP设计内容.md`(纯 TTS 基线)、`README.md`。
+>
+> **2026-09-29 第二轮追加**:v1.0.2 规划 —— **本地知识库 + 本地短期记忆 + 本地长期记忆**。
+> 详见[第十一节](#十一v102-规划2026-09-29-追加)与新增阶段 12–17,坑位 18–39;
+> 完整设计见 `docs/敏捷开发/v1.0.2 APP设计内容.md`。**尚未写一行实现代码。**
 >
 > **2026-09-29 追加**:第一~九阶段已全部实施完成,本轮在此之上做了**声纹能力扩展**(双声纹模型
 > 选择 / 对话声纹门禁 / 按说话人切克隆音色 / 声纹写操作的设备认证)。新增内容集中在
@@ -291,6 +296,23 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
   白名单空时 fail-closed 拒绝启动);③ 按说话人切克隆音色;④ 声纹写操作的设备认证(`local_auth`)。
   详见[第九节](#九声纹能力扩展2026-09-29)。**验证状态**:`flutter test` 87 项全绿、`flutter analyze` 干净、
   Android debug APK 构建通过;**真机项未验证**(见[第八节](#八验证)末尾)。
+- [x] **12 嵌入基建(v1.0.2)**:✅ 已完成。**实际走的是 `flutter_embedder` 而非 `flutter_onnxruntime`**(后者与 sherpa 的 ORT 符号版本冲突,见坑 19)。自研 WordPiece 分词器已实现并设备验证(31 测试),但**生产路径已被插件内置的 HF tokenizers 取代**;本实现保留为 **KbChunker 的 token 预算参照物**(见其文件头说明),**不要删**:`wordpiece_tokenizer.dart`(纯 Dart,读 `tokenizer.json`)+
+  对照 Python 的单测;`embedding_engine.dart`(ORT 抽象 + `flutter_onnxruntime` 实现 + 批处理)+
+  假实现;`ModelKind.embedding` + `rawFiles` 多文件下载 + resolver 分支 + ModelScope 源。
+  **验证**:分词单测;多文件下载;同义/异义相似度自测(真机跑一次真实模型)。
+- [x] **13 向量存储 + 知识库(v1.0.2)**:✅ 已完成(AppDatabase 迁移 6 测试 + KnowledgeService 14 测试):DB 升版本 + `kb_documents`/`kb_chunks`;
+  `KbChunker`(**不得复用 `TextChunker`**)+ 单测;`KnowledgeService`(导入/切块/异步回填/检索);
+  知识库管理页 + **检索试跑**。
+- [x] **14 短期记忆(v1.0.2)**:✅ 已完成(17 测试):`session_id` 迁移 + `session_summaries`;会话分段(>30min);
+  增量滚动摘要(水位线 / 失败静默 / 无 LLM 降级)。
+  **验证**:断言 LLM 调用次数随轮数**线性**增长(防 O(n²) 全量重摘要回归)。
+- [x] **15 长期记忆(v1.0.2)**:✅ 已完成(25 测试):`memories` 表;`MemoryService`(LLM 抽取 / ADD-UPDATE-NONE 去重 /
+  检索);按说话人过滤注入;**未知说话人零抽取零注入**;「记住这条」。
+- [x] **16 编排 + 接线 + UI(v1.0.2)**:✅ 已完成(编排器 21 测试 + 集成 7 测试 + 页面 7 widget 测试):`ContextAssembler`(分节/预算/裁剪优先级/防朗读标记);
+  `_buildLlmMessages` **改 async**;记忆与知识库两个设置子页 + 记忆管理页;l10n 重生成。
+- [ ] **17 验证收尾(v1.0.2)**:**部分完成** —— `flutter test` **290 项全绿**、`flutter analyze` 干净、debug APK 构建通过;:`flutter test` 全绿 + `flutter analyze` 干净 + debug APK 构建;
+  真机全流程(见 `docs/敏捷开发/v1.0.2 APP设计内容.md` 第十三节);README 更新(新依赖、
+  新模型源、隐私边界)。**未验证项**:ModelScope 应用内下载稳定性、真机推理速度、阈值实测校准。
 
 ## 七、风险与坑(实施必读)
 
@@ -433,6 +455,495 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
 
 ---
 
+## 十、本版收口追加(2026-09-29 同批次)
+
+用户在验收时提出的四点,已一并实现:
+
+### 10.1 就绪判定按模式区分
+
+早期两种模式共用一个 `isReadyForConversation`(三件套就绪),于是只用 LLM 的**文本模式也必须先下
+~250MB 本地模型**。现在 `ConversationService` 多两个谓词:
+
+```dart
+bool get isReadyForTextMode  => _settings.isLlmConfigured;              // 零本地模型
+bool get isReadyForAudioMode => isReadyForConversation && _settings.isLlmConfigured;
+```
+
+- **`isReadyForConversation` 语义不变**(仅模型维度),`start()` 也**不加** LLM 前置检查 ——
+  保留"未配 Key 则起得来、命中 LLM 才报错"的运行时路径(有测试覆盖)。
+- `ConversationPage` **必须同时 `watch<TtsSettings>()`**:改 Key 走设置的 `notifyListeners()`,
+  不触发服务通知,不 watch 就卡在初始化卡片上出不去。
+- `InitCard` 改为按模式与缺口渲染:文本模式只给"配置大模型"(不给下载入口);音频模式在
+  "模型已齐但缺大模型"时显示"还差配置大模型",**不再显示全打勾、无前进路径的下载列表**。
+
+### 10.2 大模型配置列表化
+
+单组 `baseUrl/apiKey/model` 换服务商就覆盖上一家 Key。现在:
+
+- 新增 `lib/data/models/llm_config.dart`:`LlmConfig{id,name,baseUrl,apiKey,model,systemPrompt}`
+  + `llmPresets` + `resolveLlmConfigs`(纯函数)+ `providerOfBaseUrl`。
+  **服务商不单独存字段**(由 baseUrl 反查),避免第二处可能漂移的状态。
+- `SettingsState` 新增 `List<Map<String,dynamic>> llmConfigs` + `activeLlmConfigId`,
+  单个 `setLlmConfigs` reducer 同时写列表与启用项,并把启用项**镜像**进旧的四个扁平字段
+  (唯一写点;镜像让降级回旧版本仍能读到配置)。旧扁平字段从此只作**迁移读取源**。
+- **兼容 getter 是关键取舍**:`TtsSettings.llmBaseUrl/llmApiKey/llmModel/llmSystemPrompt`
+  保持同名、改为解析"启用配置" → `llm_client.dart` / `llm_service.dart` / `conversation_service.dart`
+  / `app_dependencies.dart` **全部零改动**,11 处测试的 `setLlmApiKey('k')` 也无需改写。
+  兼容 setter 同理:写启用项,无配置则先种子化。
+- **恒有 ≥1 条配置**:`load()` 与"无配置时的写入"两处兜底;只剩一条时禁用删除。
+- 迁移判据不只看 API Key —— 只改过地址还没填 Key 的用户同样算"配过"。
+- UI:`llm_section.dart` 改为列表页 + 新的 `llm_config_edit_page.dart`(草稿式表单,保存才写)。
+- **`TextFieldSetting` 补了 `didUpdateWidget`**:否则切服务商自动填充的地址/模型在输入框里
+  **看不见**(controller 只在 initState 建过)。守卫**两个条件都要**:
+  `widget.initial != oldWidget.initial && widget.initial != _controller.text` ——
+  只比后者的话,用户打字期间父级任何一次 rebuild 都会把内容覆盖回旧值。顺带加了 `minLines`。
+
+### 10.3 合成页初始化卡片
+
+`lib/pages/synthesize/sections/synth_init_card.dart`(新)。没模型时不再只靠"点发送后弹 SnackBar",
+而是显示卡片:区分"未选过模型"(推荐 `kDefaultSynthModelId`)与"选了没下载",一键下载并启用,
+另有"更多模型"跳设置。**不内嵌完整 TTS 列表**(最大 349MB 的 Kokoro 不适合当初始化默认项)。
+
+> ⚠️ **两条硬约束**(踩过,`IndexedStack` 会同时构建三个 Tab,该卡片与对话页卡片同处一棵树):
+> 1. 主按钮 key **必须避开 `initDownloadButton`**,否则对话页的 `findsOneWidget/findsNothing` 断言挂。
+> 2. 静置态**不能有不确定进度条**(`value: null`),否则 `pumpAndSettle` 永不收敛。
+
+### 10.4 空状态提示文案
+
+`speaking_bubbles_view.dart` 的空状态原本是**无 style 的裸 `Text`**(继承全强度 `inkPrimary`)。
+改为 `AppText.tertiary(AppText.caption)` + `textAlign: center` + 32 水平内边距,
+并在 ARB 的子句间插 `\n` 保证两行。
+
+### 10.5 本批次新增测试(87 → 112)
+
+`test/llm_config_test.dart`(12)、`test/llm_section_test.dart`(5)、`test/synthesize_init_test.dart`(3)、
+`conversation_service_test.dart` +3、`conversation_page_test.dart` +1(文本模式门)、
+`persistence_test.dart` 改写大模型断言(原来那条**空转通过** —— `llmBaseUrl` 的默认值恰好等于断言值)
+并新增旧字段往返。
+
+---
+
+## 十一、v1.0.2 规划(2026-09-29 追加)
+
+**完整设计见 `docs/敏捷开发/v1.0.2 APP设计内容.md`**(自足,含流水线图、SQL 建表、提示词格式、
+UI/l10n、验证清单)。本节只记**决策、已核实事实与坑**,便于在本文件内一站式交接。
+
+### 11.1 目标与边界
+
+给应用补上**记忆与知识**层。三块:本地知识库(KB)、本地短期记忆(STM)、本地长期记忆(LTM)。
+
+- **向量计算完全离线**(本地 ONNX 嵌入模型);**记忆抽取与回答生成用在线 LLM**。
+  即"**检索离线、提炼与生成在线**" —— LLM 仍是唯一联网组件,该定位不变。
+- 三者语义**不可互相替代**,必须分开存、分开删:
+  - **STM** = 当前会话工作记忆 = 最近 N 轮原文(v1.0.1 已有)+ **更早轮次的滚动增量摘要**(新增)。
+    **不是新的消息存储** —— 原文只存 `conversation_messages`,STM 是它的压缩视图(摘要 + 水位线)。
+  - **LTM** = **关于某个人的、跨会话成立的短事实**,挂**说话人**(与 v1.0.1 声纹能力咬合)。
+  - **KB** = **用户主动导入的文档**。与 LTM 的本质差别:KB 是用户显式给的资料,LTM 是从对话推断的。
+
+### 11.2 新增依赖与模型(全部已核实)
+
+| 组件 | 选型 | 已核实事实 |
+|---|---|---|
+| ONNX 运行时 | `flutter_onnxruntime` **^1.8.5** | ORT 1.23.0;≥1.5.1 满足 16KB 页面对齐;2026 年持续维护 |
+| 嵌入模型 | `Xenova/bge-small-zh-v1.5` → `onnx/model_quantized.onnx` | **24,010,842 B**;512 维;int8 |
+| 文件导入 | `file_picker` **^13.1.0** | 走 Android SAF,免存储权限 |
+
+**下载源用 ModelScope(不用 hf-mirror)**:
+
+| 源 | 实测 |
+|---|---|
+| `huggingface.co` 直连 | ❌ **无响应(被墙)** |
+| `hf-mirror.com` | ✅ 302→200 |
+| **`modelscope.cn`** | ✅ **推荐**,4 文件全 `200` |
+
+基址 `https://modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master`,四文件:
+`onnx/model_quantized.onnx` = 24,010,842 · `tokenizer.json` = 439,125 · `vocab.txt` = 109,540 · `config.json` = 716。
+
+**已实测的下载行为**(决定能否复用现有下载器):
+- `Range: bytes=0-1023` → **`HTTP/1.1 206 Partial Content`** ⇒ **断点续传可用**,
+  现有 `HttpModelDownloader` 的 dio Range 续传逻辑**零改动复用**。
+- 前 16 字节 = `\b\006\022\r o n n x . q u a n t i z`(ONNX protobuf,`producer_name="onnx.quantize"`)
+  ⇒ **真模型文件,非拦截页**。这类校验照抄现有 bzip2 魔数校验的做法。
+
+**排除项**:`onnxruntime`(gtbluesky,最新 1.4.1)—— 有**未修复的 Android `libonnxruntime.so`
+dlopen 失败**(issue #28,2024-12 报出至 2025-11 未解)与 `MergeNativeLibsTask` 重复库报错。**勿选。**
+
+### 11.3 向量化流水线(全部参数来自仓库配置文件,非记忆)
+
+```
+文本 → WordPiece 分词 → input_ids/attention_mask/token_type_ids([1,L] int64)
+     → OrtSession.run → last_hidden_state [1,L,512]
+     → 取 [CLS](token 0)的 512 维                    ← CLS 池化
+     → L2 归一化(单位向量 ⇒ 余弦 = 点积)
+     → Float32List(512) ⇒ Uint8List(2048 B) 存 SQLite BLOB
+```
+
+| 参数 | 值 | 来源 |
+|---|---|---|
+| 嵌入维度 | **512** | `config.json` `hidden_size` / `1_Pooling` `word_embedding_dimension` |
+| 最大长度 | **512**(含 `[CLS]`/`[SEP]` ⇒ 内容 ≤ **510**) | `config.json` `max_position_embeddings` |
+| 池化 | **`pooling_mode_cls_token: true`**,`mean_tokens: false` | `1_Pooling/config.json` |
+| 中文切分 | `tokenize_chinese_chars: true`(按字切) | `tokenizer_config.json` |
+| 词表 | 21128(BERT-small,4 层/8 头) | `config.json` |
+
+**分词器自实现**(纯 Dart 读 `tokenizer.json`):BasicTokenizer(CJK 逐字切/标点切/空白切)+
+WordPiece(贪心最长匹配,续接前缀 `##`,未命中 `[UNK]`)。**验收:分词结果与 Python `transformers`
+对照**(取 5–10 条样本固化进单测)。
+
+**必须批处理**:`[B, L]` 一次前向跑 8–16 块。逐块调用 ⇒ 1000 块 = 1000 次前向,
+单块 512 token 在手机上约 50–200ms,**合计 1–3 分钟**。
+
+### 11.4 存储与检索
+
+**沿用同一个数据库文件** `sherpa_tts/conversation.db`,`SqliteConversationStore` 的 `_version`
+提升 + 在 `_migrations` 追加建表(该文件已有版本化迁移骨架,新增表不动老数据)。
+
+```sql
+kb_documents(id, title, source_path, imported_at, char_count, chunk_count, embedded_count)
+kb_chunks(id, doc_id, seq, text, embedding BLOB NULL, dim, model_id)
+  INDEX idx_kb_chunks_pending ON kb_chunks(embedding) WHERE embedding IS NULL
+memories(id, speaker, kind, content, embedding BLOB, dim, model_id,
+         confidence, source_msg_id, created_at, updated_at)
+session_summaries(session_id PK, summary, summarized_up_to_id, updated_at)
+```
+
+- **`embedding` 可空是核心**:支持"导入瞬时完成、嵌入后台回填"(11.5)。
+- **`model_id` 不可省**:换模型后旧向量与新向量**不可比且维度相同、不报错**(与坑 13 同构)。
+  检索只取 `model_id = 当前模型`;不匹配按"未嵌入"处理并提示重建索引。
+- `conversation_messages` **增 `session_id` 列**(`ALTER TABLE ADD COLUMN`,老数据回填当前 session)。
+- **不用 SQLite FTS5**:Android 系统 SQLite 在 **minSdk 23 不保证 FTS5**;且本项目检索是向量不是关键词。
+
+**检索 = 内存暴力点积**(单位向量 ⇒ 余弦 = 点积):
+
+| 规模 | 内存 | 单查询乘加 | 量级 |
+|---|---|---|---|
+| 1,000 块 | 2 MB | 51 万 | 亚毫秒 |
+| 10,000 块 | 20 MB | 512 万 | 数毫秒 |
+| 50,000 块 | 100 MB | 2,560 万 | 数十毫秒 |
+
+**1 万块以内暴力检索延迟不可感知**;ANN(HNSW/IVF)在此规模只带来构建成本、内存开销与
+"近似召回漏掉正确块"的新失败模式。**不引 sqlite-vec / 向量数据库**。
+**规模上限:~5 万块之后再考虑 ANN 或按文档分页。**
+
+### 11.5 关键取舍
+
+1. **异步嵌入回填**:导入**只同步落文本**(`embedding = NULL`),用户立刻看到文档;
+   嵌入在后台批量回填。检索只取已嵌入的块 ⇒ 未索引完的文档**部分可检索**,列表显示
+   "索引中 3/12"。任务可取消、可断点续。避免让用户对着转圈对话框等 1–3 分钟。
+2. **切块必须新写 `KbChunker`,不得复用 `TextChunker`**。后者服务 TTS(首句 `1+4+10` 词、
+   后续整句 ≤20 词),目标是朗读自然;对检索是错的语义边界(块太碎 ⇒ 语义不完整、命中率低)。
+   `KbChunker`:标题/空行段落优先 → 超长按句末标点二次切 → 相邻**重叠 ~15%** → 硬上限 **510 token**。
+3. **STM 增量摘要**:`session_id` 在 `start()` 时若距上次活动 **> 30 分钟**则新建;
+   未摘要消息 ≥ 10 条时取最老 10 条 **+ 已有摘要** → 新摘要 → 更新水位线。
+   **必须增量** —— 全量重摘要是 O(n²) token 消耗。
+4. **LTM 抽取每 4 轮批量一次**(单轮上下文不足以推出稳定事实),输入"最近若干轮 +
+   该说话人已有记忆 top-k",输出 `[{op: ADD|UPDATE|NONE, id?, kind, content}]`。
+   **不去重会无限膨胀且自相矛盾**(三个月后会有五条"用户在减肥"与互相冲突的饮食偏好)。
+5. **未知说话人零抽取零注入**(硬约束)。与 v1.0.1 访客模式一致;否则把张三的记忆注入
+   给陌生人 = **跨人信息泄漏**,而且听起来极自然、极难察觉。判据看**当前识别结果**,
+   不看"库里有谁的记忆"。
+6. **`ContextAssembler` 预算编排**(本版核心,`_buildLlmMessages` **改 async**):
+
+```
+总预算 B(默认 4000 token 估算)
+├─ ① 系统提示 / ② 身份+备注      固定,不裁剪
+├─ ③ 知识库 top-k                ≤ 1200
+├─ ④ 长期记忆 top-k              ≤ 600
+├─ ⑤ 会话摘要(STM)              ≤ 500
+└─ ⑥ 最近 N 轮原文               剩余,且至少保留最近 4 轮
+裁剪顺序(先砍离当下最远的):③ KB → ④ LTM → ⑤ 摘要 → ⑥ 最近 N 轮
+```
+   token 用启发式估算(中文 ~1 字/token,`est ≈ chars / 1.6`)+ **预留 20% 余量**;
+   不为此引 tokenizer 依赖 —— **预算只需"不超太多",不需精确**(要写进代码注释)。
+
+7. **检索失败一律降级为不注入**,绝不打断对话(同门禁"不卡死对话"原则)。
+
+### 11.6 新增设置(照抄 `asrModelId` 的"五处"模式)
+
+`memoryEnabled`(true)、`memoryExtractInterval`(4)、`memoryTopK`(6)、`kbEnabled`(true)、
+`kbTopK`(4)、`kbScoreThreshold`(**0.45,猜测值,须实测校准**)、`embeddingModelId`(null)、
+`contextBudgetTokens`(4000)。
+
+### 11.7 追加坑位(18–39)
+
+**依赖与构建**
+
+18. **别选错 onnxruntime 包**:gtbluesky `onnxruntime` 1.4.1 有未修复的 Android dlopen 失败;
+    用 `flutter_onnxruntime` ≥1.8.5。
+19. ☠️ **`sherpa_onnx` 与 `flutter_onnxruntime` 在同一 APK 内【无法共存】—— 本地 ONNX 文本嵌入方案已证伪**
+    这一条改写过**两次**,前两版都是错的,此处只保留已实测证实、可复现的结论。
+    **过程留痕(避免后人重走)**:① 先误判为"`.so` 名不同、静态链接 ⇒ 共存安全";
+    ② 构建失败后误判为"选较新的那份即可"(`pickFirsts`),构建虽通过,
+    **但 App 一启动插件注册就失败**:
+    ```
+    dlopen failed: cannot locate symbol "OrtGetApiBase" referenced by
+      ".../base.apk!/lib/x86_64/libonnxruntime4j_jni.so"
+      at ai.onnxruntime.OnnxRuntime.load → FlutterOnnxruntimePlugin.onAttachedToEngine
+    ```
+    **真正根因:符号版本化(ELF symbol versioning),不是符号缺失。**
+    两份 ORT 都**导出**了 `OrtGetApiBase`(`.dynsym` 里 DEFINED/GLOBAL),所以
+    `grep`/`nm` 一类的检查**看起来一切正常** —— 这也是前两次误判的来源。
+    它们真正的差别在版本节点:
+
+    | 制品 | 定义的版本节点 | 需要的版本节点 |
+    |---|---|---|
+    | 插件 ORT `onnxruntime-android` 1.23.0 | `VERS_1.23.0` | — |
+    | sherpa 自带 ORT 1.27.1 | `VERS_1.27.1` | — |
+    | 插件 `libonnxruntime4j_jni.so`(消费方) | — | **`libonnxruntime.so@VERS_1.23.0`** |
+    | sherpa `libsherpa-onnx-c-api.so`(消费方) | — | **`libonnxruntime.so@VERS_1.27.1`** |
+
+    两侧 soname 都是 `libonnxruntime.so` ⇒ APK 里**只能存在一个文件**;
+    而每个消费方都把符号绑到**以自己 ORT 版本命名**的版本节点上
+    ⇒ 任一份都**只能满足一个消费方**。`pickFirsts` / 选版本 / Gradle 排除**统统无解**。
+    Android 链接器的报错**只打印基础符号名**(`OrtGetApiBase`)、**不打印版本节点**,
+    这是本条最坑的地方。
+
+    **⇒ 结论:`flutter_onnxruntime` 已从 `pubspec.yaml` 移除,`pickFirsts` 已撤销。**
+    本地检索改用**纯 Dart BM25**(零原生依赖、零模型、完全离线)。
+    **凡"想再引入一个 ONNX 运行时"的念头,先回来看这一条。**
+    另:早期版本还有一条与之无关的坑(gtbluesky `onnxruntime` 1.4.1 的 Android
+    dlopen 失败,issue #28),所以那个包同样不能用。
+    **体积估算修正**:原"~15–25MB/ABI 叠加"不成立 —— 因为根本不可能两份共存。
+
+    **附:`flutter_embedder` 也已评估(2026-09-29 实测),结论是"有机会但代价高,暂不采用"。**
+    它与上面那个包的关键差异是**可能绕开冲突**:
+    `rust/Cargo.toml` 里 `ort = { version = "2.0.0-rc.11", features = ["load-dynamic"] }`
+    —— ORT 由 Rust 在**运行时 `dlopen` 按名字加载**,不走 AAR 的 `libonnxruntime4j_jni.so`。
+    因此理论上可以**不引入 `onnxruntime-android`,直接指向 sherpa 已在 APK 里的那份
+    ORT 1.27.1**(ORT C API 向后兼容:按 v23 请求由 1.27 满足;`dlsym` 取的是默认版本符号)。
+    功能上也对得上:内置 HF `tokenizers`(可取代自研 WordPiece),且明确支持
+    **BGE + CLS 池化**。
+    **但实测两点卡住**:
+    ① **内置 cargokit 在本项目工具链上编不过** —— `cargokit/gradle/plugin.gradle` 用了
+       **Gradle 9 已移除**的 `project.exec()`,报
+       `Could not find method exec() for arguments [...] on project ':flutter_embedder'`;
+       本项目是 **Gradle 9.1.0 + AGP 9.0.1**(降 Gradle 不现实,AGP 9 要求 Gradle 9)。
+       要用它必须**把插件 vendor 成 path 依赖并改这段脚本**(换成 Gradle 9 的
+       `ExecOperations` / `providers.exec`)。
+    ② **需要 Rust 工具链**(cargokit 从源码编译 Rust cdylib;本机无
+       `cargo`/`rustc`/`rustup`/`cargo-ndk`)。`cargokit_options.yaml` 里有
+       `use_precompiled_binaries: true`,但**未验证**是否真发布了各 ABI 的预编译产物。
+    ③ 且 0.1.7、最后发布 2026-01-20(已 8 个月)、0.1.x 早期版本。
+    **⇒ 当时结论 = 先修 cargokit + 装 Rust + 再赌 ort crate 与 sherpa 那份 ORT 的兼容性。**
+
+    ✅ **2026-09-29:这条路已走通并在模拟器上实测通过**,结论修正为【采用】。见下方 19.1。
+
+### 19.1 `flutter_embedder` 方案已实测通过(2026-09-29)
+
+**核心赌注成立**:`ort` crate 的 `load-dynamic` **能加载 sherpa 已打进 APK 的那份
+`libonnxruntime.so`(1.27.1)**,因此**不需要引入 `onnxruntime-android`**,
+同 soname + 符号版本节点的死结被绕开。设备实测(Android 17 / x86_64 模拟器):
+
+| 项 | 结果 |
+|---|---|
+| `initFlutterEmbedder(path: 'libonnxruntime.so')` | ✅ **33ms** |
+| 建会话 + 首次推理 | ✅ 120ms |
+| 维度 / L2 归一化 / 确定性 | ✅ 512 维、单位向量、可重复 |
+| **语义判别力** | ✅ 同义 **0.75–0.81** vs 异义 **0.24–0.27** |
+| 性能(372 字符块) | n=1 128ms/条;n=16 均摊 **80.5ms/条**(模拟器,真机更快) |
+| 超过 512 token 的输入 | ✅ **响亮失败**(不静默截断) |
+
+⇒ 1000 块索引约 80s(模拟器)/ 20–40s(真机),配合**异步 + 可中断 + 断点续**的后台回填可接受。
+
+**随之而来的新坑位(46 起)**
+
+46. **嵌入是同步 FFI,必须跑在后台 isolate**。`BgeEmbedder.embed()` 返回
+    `List<Float32List>`(**不是 `Future`**),Rust FFI 同步调用会**阻塞所在 isolate**:
+    单次 ~128ms、全量索引 ~80s,在 UI isolate 上调用即卡死/ANR。
+    复用本仓库既有的"隔离区"模式(该 isolate 内需自行 `RustLib.init()` 并建自己的 embedder)。
+47. **插件不会替你截断**。输入超过模型 `max_position_embeddings`(512 token)时 ORT 在
+    Add 节点报 `Attempting to broadcast an axis by a dimension other than 1. 512 by N`。
+    这是**响亮失败**(好过静默丢内容),但**调用方必须自己切块** ——
+    正好由 `KbChunker` 预算 500(且用**字符数当 token 数上界**,中文约 1:1,永不越界)守住。
+48. **构建前置条件变重了(本版最大协作成本)**:`flutter_embedder` 走源码编译需要
+    ① **Rust 工具链** + ② **MinGW-w64(gcc,作宿主机链接器)** + ③ rustup
+    **`default-host` 必须是 `x86_64-pc-windows-gnu`**(cargokit 用裸名 `stable` 调 rustup,
+    默认宿主为 msvc 时会报 `toolchain 'stable-x86_64-pc-windows-msvc' is not installed`)+
+    ④ **Android NDK 目录下要有 `package.xml`**(cargokit 靠它判断 NDK 是否已安装;
+    本机 NDK 只有 `source.properties`,已手工补)。
+    **换机器 / 重装 SDK 都要重做 ③④,否则构建失败。**
+49. **本插件通过 Gitee fork + git 依赖引入,补丁以 commit 形式存在 fork 里**。
+    fork:`https://gitee.com/liuhong1happy/flutter_embedder`(基于上游 0.1.7),
+    补丁提交 `d5b6433`(说明见该仓库的 `PATCHES.md`):
+    ① `project.exec()` → `providers.exec{}.result.get()`(Gradle 9 已移除前者);
+    ② 三处 `java.nio.file.Path` → `String`(`providers.exec` 需序列化参数);
+    ③ `compileSdkVersion 33` → `36`、`minSdkVersion 19` → `23`、Java 8 → 17。
+
+    **为什么不用 vendor 也不用 submodule**:
+    vendor 会把 1.4MB / ~300 个第三方文件塞进仓库;submodule 则要求每个克隆者记得
+    `--recurse-submodules`,且补丁仍要另行维护 —— 两者都没解决"补丁放哪"的问题。
+    fork + git 依赖让补丁变成 fork 里的 commit(有历史、可 diff、可 rebase 上游),
+    仓库里只留一行 ref。**Gitee 而非 GitHub**:本环境 github 直连不可靠(实测
+    HTML 页面无响应、代理 403),而 gitee 可达。
+    ⚠️ **pubspec 里用 HTTPS 而非 SSH 地址**:HTTPS 可匿名读取,CI/同事无需配密钥;
+    SSH(`git@gitee.com:...`)只在**推送补丁**时需要。
+    ⚠️ **ref 必须钉 commit sha,不要用分支名** —— 否则上游一动,构建内容就悄悄变了。
+    上游是 **0.1.7、最后发布 2026-01-20(已 8 个月)**;升级上游时把新版合进 fork、
+    重打补丁、再更新 ref。
+50. **`flutter_rust_bridge` 的 Dart 侧必须钉死 `2.11.1`**。插件 Rust 侧钉
+    `=2.11.1`,Dart 侧只声明 `^2.11.1` 会被解析到更新版,运行时抛
+    `codegen version (2.11.1) should be the same as runtime version (2.13.0)`。
+    已在 `pubspec.yaml` 用 `dependency_overrides` 钉住。
+51. ⚠️ **"预编译产物"那条路有个未查明根因的 bug(已绕开,未修)**:
+    走预编译时产物**下载成功却没进 APK** —— cargokit 把输出目录落到了插件源码树的
+    `android/src/main/jniLibs/arm64-v8a/`(空目录),于是 Gradle 静默打了不含该库的包,
+    **构建"成功"但 APK 里根本没有 `libflutter_embedder.so`**。
+    当前对策是 `cargokit_options.yaml` 里 `use_precompiled_binaries: false` **强制源码编译**,
+    路径自然正确。**代价是每台机器都要有 Rust**(见坑 48)。
+    若能查明并修掉这个 bug,即可恢复"下载预编译、免装 Rust"的快路径 —— **值得做**。
+52. **隐式耦合**:嵌入依赖 APK 内存在名为 `libonnxruntime.so` 的库(sherpa 提供)。
+    将来 sherpa 改名或不再打包,嵌入会在**运行时**才失败 ⇒ 需要**启动自检**。
+53. `cargokit_options.yaml` 里的 `verbose_logging: true` 是排查期临时开的,**应关掉**(已关)。
+54. ⚠️ **重构时别破坏 `??` 的短路求值 —— 它承担着"测试不碰 path_provider"的职责**。
+    `AppDependencies.init()` 里原本是:
+    ```dart
+    final conversationStore = _conversationStore ??
+        SqliteConversationStore(await _conversationDbPathProvider());
+    ```
+    `??` 短路 ⇒ 注入了内存 store 时**根本不会**调用 `_conversationDbPathProvider()`,
+    而它默认走 `path_provider`,在单元测试里抛 `MissingPluginException`。
+    引入 `AppDatabase` 时我把 `await` 挪到了 `??` 外面,变成**无条件调用**,
+    于是**所有注入了内存 store 的测试全挂**(报的就是上面那个异常)。
+    现写法显式保留惰性(见 init 里的注释与 `appDatabase` 为何可空)。
+    **教训:凡是"注入替身就跳过真实依赖"的地方,依赖惰性求值的代码都不能随手外提。**
+55. ☠️ **不要给本项目加 `integration_test` dev 依赖 —— 它会直接搞坏 release 构建。**
+    实测:加了 `integration_test`(SDK 包)之后,`flutter build apk --release` 报
+    `compileReleaseJavaWithJavac` 失败:
+    ```
+    GeneratedPluginRegistrant.java:34: 程序包 dev.flutter.plugins.integration_test 不存在
+    GeneratedPluginRegistrant.java:54: 程序包 pl.leancode.patrol 不存在
+    ```
+    机制:该文件由 Flutter 生成在 `android/app/src/main/java/io/flutter/plugins/`
+    (**未被 git 跟踪**),加入新 dev 依赖会触发它重新生成,而重新生成的版本把
+    **dev-only 插件也写了进去**;release 变体的 classpath 里没有这些插件类 ⇒ 编译不过。
+    (只有 `patrol` 时不会触发;加了 `integration_test` 就会。)
+    **已验证**:去掉该依赖后 release 立刻构建成功(153.2 MB)。
+    ⇒ **设备侧测试一律放 `patrol_test/`**(项目本来就用 patrol,且不受此影响)。
+    本版把嵌入引擎的设备验证按此原则迁到了 `patrol_test/embedding_test.dart`。
+20. **首次构建需 Maven Central**(插件拉 ORT 原生库)。
+    ✅ **2026-09-29 实施实测:已被现有配置覆盖,不再是风险** —— `android/settings.gradle.kts`
+    的 `dependencyResolutionManagement` 里早就配了**阿里云镜像**
+    (aliyun google/central/public + google + mavenCentral),ORT AAR 顺利拉取,
+    `~/.gradle/caches` 下 4 个 ABI 的 `libonnxruntime.so` 全部就位
+    (armeabi-v7a / arm64-v8a / x86 / **x86_64**)。**x86_64 在 ⇒ 模拟器可做真机验证。**
+21. Android 需 `android/app/proguard-rules.pro`:`-keep class ai.onnxruntime.** { *; }`。
+
+**嵌入正确性(全是"不报错只变差"型)**
+
+22. **池化用 CLS 不是 mean**。mean 池化一样能算出 512 维、一样能存能检索,只是**排序整体劣化**,
+    无任何异常可看。依据 `1_Pooling/config.json`。
+23. **`do_lower_case` 两份配置互相矛盾**(实测,已定案):候选三源 ——
+    `sentence_bert_config.json` = `true` vs `tokenizer_config.json` = **`false`**
+    vs **`tokenizer.json` 的 `normalizer.lowercase` = `false`**。
+    取 **false**:`tokenizer.json` 是运行时的**权威**来源,另两处与之矛盾的是
+    sentence-transformers 写入的遗留默认值。
+    ✅ **并已用行为证实**:真词表下 `Hello` → `[101, 100, 102]`,**100 = `[UNK]`**
+    (词表里只有小写 `hello`)。若误按 lowercase=true 处理会先折叠成 `hello` 并命中其 id
+    —— 这条已固化为回归用例(`test/wordpiece_tokenizer_test.dart`)。
+24. **必须 L2 归一化**,否则"点积当余弦"是错的,且**排序看起来还算合理**。
+25. **ONNX 外置数据陷阱**:`onnx-community/bge-small-zh-v1.5-ONNX` 是 `.onnx`(**168,002 B**,仅图)
+    + `.onnx_data`(**23,774,208 B**,权重)拆分格式,ORT 要求两者**同名同目录**,
+    只下 `.onnx` 必然加载失败。**用 `Xenova/bge-small-zh-v1.5` 单文件版**,并在 resolver
+    断言 embedding 目录不出现 `_data` 伴生文件。
+26. **超长必须截断到 510 token**。
+27. **换嵌入模型后旧向量必须废弃**(`model_id` 不匹配即视为未嵌入)。
+
+**原生资源**
+
+28. `OrtSession.close()` / `OrtValue.dispose()` **不在 Dart GC 管辖内**。批量循环漏 `dispose`
+    会稳定泄漏原生堆直至 OOM,而 **Dart 侧内存曲线看不出来**。循环写 `try/finally`。
+29. **嵌入引擎空闲必须卸载**(session 常驻约 100MB);沿用"各引擎独立懒加载"原则,
+    **不得在页面 build 时加载**(坑 9)。
+
+**设计与语义**
+
+30. **不得复用 `TextChunker` 做知识库切块**(见 11.5-2)。
+31. **未知说话人零 LTM 抽取 + 零注入**(见 11.5-5)—— 必须有回归测试守住。
+32. **知识库/记忆检索失败一律降级为不注入**。
+33. **提示词必须要求不要念出 `[1]` 这类引用标记** —— 回复会被 TTS 朗读,
+    用户会**听见"资料方括号一"**。这是语音场景独有的坑,文本聊天里根本不会暴露。
+34. **STM 摘要必须增量**(水位线),全量重摘要 O(n²)。
+35. **摘要/抽取失败静默跳过**,绝不阻塞对话、绝不弹错。
+36. **`_buildLlmMessages()` 改 async** 会波及 `test/conversation_service_test.dart` 现有断言;
+    先改签名再跑测试,别等最后一并发现。
+37. **导入要有体积与算力上限**(单文件上限 + 批大小上限),防一次导入把手机算爆。
+38. **KB 与 LTM 分开存、分开删**(表与入口都分开),合并会导致"删记忆顺带删资料"。
+39. **编辑器编码兜底**:UTF-8 为主,失败试 GBK(中文 txt 常见),再失败给可读错误。
+
+### 11.8 本版新增的隐私边界(必须写进 README)
+
+⚠️ 与"声纹不是安全因子"(v1.0.1)并列的**第二条边界**:
+
+1. **知识库与长期记忆的内容会发给第三方 LLM**。本版把"送出去的数据"从"当前对话"扩大到
+   "用户的文档片段与关于用户的持久事实"。**这是本版最大的隐私面变化。**
+   注入的是**检索命中的片段**而非整库 —— 但命中片段同样可能含敏感信息。
+2. **KB 与记忆明文落盘**(SQLite,非加密),本机可读。
+3. **记忆抽取额外消耗用户自付的 API token**,且每次抽取都会把已有记忆 top-k 一起发送。
+   开关默认开,但设置页必须说明。
+4. **未知说话人不注入任何长期记忆** —— 本版唯一一条真正的隔离保证,需回归测试守住(同 11.5-5)。
+
+### 11.9 实施期实测结果与新增坑位(2026-09-29 实施中)
+
+**已实测通过(不再是"规划中的假设")**
+
+| 项 | 结果 |
+|---|---|
+| 依赖解析 | `flutter pub get` 通过;新增包仅 `flutter_onnxruntime`、`file_picker` 及其平台实现 + `cross_file`/`win32`/`xml`/`petitparser`/`dbus`/`ffi_leak_tracker`。**`jni`/`jni_flutter` 是既有依赖**(来自 `record` 7.x),不是本版引入 |
+| ORT 原生库 | 阿里云镜像生效,4 个 ABI 的 `libonnxruntime.so` 全部就位(**x86_64 在 ⇒ 模拟器可验证**) |
+| 模型下载 | **ModelScope 直连实测 `http=200`,`24,010,842 B`(与 API 报的字节数精确一致),`2.59s` 下完**,魔数 = ONNX protobuf |
+| 分词器 | **与 transformers.js(官方 Rust tokenizers,同源 HF Python)在 20 条文本上逐 token 完全一致**(中文逐字/中英混排/中英标点/空白/数字/600+ 字长文)。31 项单测全绿 |
+
+**新增坑位(40 起)**
+
+40. **插件对 `List<int>` 会推断成 `Int32List`,而 BERT 要 int64**。`OrtValue.fromList` 按数值
+    范围推断类型,落在 Int32 内就转 `Int32List` ⇒ 模型拒绝或**静默算错**。
+    **必须显式传 `Int64List`**(`embedding_engine.dart` 已如此)。
+41. **输出张量整体跨 method channel 回传,`B` 与 `L` 直接决定传输开销**。插件的
+    `runInference` 返回后还要 `getOrtValueData` 取数据,而 `last_hidden_state` 是 `[B,L,512]`
+    —— L=510、B=1 时单条就是 **262,144 个数**。原计划"批处理摊薄成本"的假设**必须实测复核**:
+    批大摊薄推理次数,但放大传输量,存在最优点。
+    **`batchSize` 与 `maxTokens` 是性能旋钮,默认值须由真机实测决定**(见阶段 17)。
+42. **检索的 `minScore` 不设默认阈值**。起先默认 `0.0`,导致反向向量(-1.0)被静默滤掉,
+    调用方"传了候选却拿不到候选"且看不出原因。现改为哨兵常量
+    `kNoScoreThreshold = double.negativeInfinity` —— **过滤是调用方的显式决定**,
+    业务阈值(`kbScoreThreshold = 0.45`)属于设置层。
+43. **切块器的两个 off-by-one(均被测试抓出,已修)**:
+    ① `_splitBlocks` 曾给每行无条件补 `\n`,使**最后一块多出一个源文本里不存在的换行**,
+    `charEnd` 越界(321 > 320);
+    ② 为处理 CRLF 而剥离 `\r` 后,`text.length` 不再等于块在源文本中的跨度,
+    导致**所有块区间整体短算、相邻块之间出现未覆盖空隙**。
+    定案:**内部文本必须与源文本逐字符对应**(偏移才算得准),`\r` 只在产出
+    `KbChunk.text` 时清理。
+    → 由此确立一条硬性不变量并立了回归用例:**每个块的 `0 <= charStart < charEnd <= 文档长度`**。
+44. **知识库切块的不变量是"不丢内容"**,不是"切得整齐"。切块出错时用户完全无感
+    (只是"检索不到那一句"),所以测试用**字符区间并集覆盖全文非空白字符**来守
+    (`expectFullCoverage`),而不是靠肉眼看块数。
+45. ⚠️ **`flutter test integration_test/` 里 `path_provider` 不可用**(实测踩到)。
+    `path_provider_android` 2.x 在 Android 上**直接走 `package:jni`**,而
+    `flutter test integration_test/xxx.dart -d <设备>` **不执行 app 的 `main()`**
+    ⇒ Dart 侧插件(`jni_flutter`)未初始化 ⇒
+    `getApplicationDocumentsDirectory()` 抛 **`No JNI instance is available`**。
+    **patrol 走真实 `main()`,所以既有 patrol 测试从不暴露这个问题** —— 只有新加
+    integration_test 才会踩。
+    对策:设备侧测试**不要用 `path_provider`**,直接写应用私有目录。已从源码确认路径:
+    `getApplicationDocumentsPath()` = `context.getDir("flutter", MODE_PRIVATE)`
+    ⇒ **`/data/user/0/<pkg>/app_flutter`**;
+    `getApplicationSupportPath()` = `context.filesDir` ⇒ `/data/user/0/<pkg>/files`
+    (**两者不是一回事,别写混**)。见 `integration_test/embedding_spike_test.dart`。
+46. ⚠️ **patrol 用例名里不能出现 `/`**(实测踩到,代价是"整轮 0 个用例")。
+    Android Test Orchestrator 拿用例名当文件名去 `openFileOutput('<用例名>.txt')`,
+    名字里带路径分隔符 ⇒ `IllegalArgumentException: File ... contains a path separator`
+    ⇒ **Orchestrator 自己被杀**,最终只报回
+    `Total: 0` + `Instrumentation run failed due to Process crashed`。
+    **看起来像 App 崩了,其实一个用例都没跑**,而且 Dart 侧没有任何堆栈 ——
+    真相只在 `adb logcat` 里的 `AndroidTestOrchestrator` 一行。
+    对策:用例描述用 `+`、`→`、`;`,**不要用 `/`**。
+    (`patrol_test/embedding_test.dart` 原来的 "加载 / 语义 / 后台 isolate 不阻塞 UI" 就踩了这个 ——
+    整轮 0 用例、且看起来像 App 崩溃;改成 `加载 + 语义 + ...` 后设备实测通过,
+    含 ModelScope 真实下载 24.5MB + 后台 isolate 不阻塞校验。)
+
+---
+
 ## 关键文件清单
 
 - 修改:`lib/models/tts_model.dart`、`lib/data/model_catalog.dart`、`lib/data/model_files_resolver.dart`、`lib/data/model_manager.dart`、`lib/app_dependencies.dart`、`lib/app.dart`、`lib/ui/main_shell.dart`、`lib/ui/tts_settings_page.dart`、`lib/models/tts_settings.dart`、`lib/dva/app_models.dart`、`lib/dva/app_dva.dart`、`lib/tts/tts_streaming_service.dart`、`pubspec.yaml`、`android/app/src/main/AndroidManifest.xml`、`android/app/build.gradle.kts`(minSdk)、`lib/l10n/app_zh.arb`+`app_en.arb`
@@ -454,3 +965,33 @@ conversationTab、startConversation/stopConversation、listening/recognizing/thi
   `lib/l10n/app_zh.arb` + `app_en.arb`、`pubspec.yaml`(`local_auth`)、
   `android/app/src/main/AndroidManifest.xml` + `MainActivity.kt`、`ios/Runner/Info.plist`、
   `test/support/fakes.dart` 与全部构造 `AppDependencies` 的测试文件(注入 `FakeAppLockService`)。
+
+**2026-09-29 v1.0.2 规划涉及的文件**(尚未创建/修改,规划清单):
+
+- 新增:
+  - `lib/utils/memory/wordpiece_tokenizer.dart`(纯 Dart BERT 分词器)
+  - `lib/utils/memory/embedding_engine.dart`(ORT 抽象 + `flutter_onnxruntime` 实现 + 批处理)
+  - `lib/utils/memory/vector_store.dart`(SQLite BLOB 存取 + 暴力点积 top-k)
+  - `lib/utils/memory/kb_chunker.dart`(**独立于 `text_chunker.dart`**)
+  - `lib/utils/memory/knowledge_service.dart`(导入/切块/异步回填/检索)
+  - `lib/utils/memory/session_memory_service.dart`(会话分段 + 滚动增量摘要)
+  - `lib/utils/memory/memory_service.dart`(LTM 抽取 / ADD-UPDATE-NONE 去重 / 检索)
+  - `lib/utils/memory/context_assembler.dart`(**预算编排,本版核心**)
+  - `lib/data/models/memory_item.dart`、`lib/data/models/kb_document.dart`
+  - `lib/pages/knowledge/knowledge_page.dart`(+ 检索试跑)、`lib/pages/memory/memory_page.dart`
+  - `test/wordpiece_tokenizer_test.dart`、`test/kb_chunker_test.dart`、
+    `test/knowledge_service_test.dart`、`test/memory_service_test.dart`、
+    `test/context_assembler_test.dart`、`patrol_test/knowledge_test.dart`
+- 主要修改:
+  - `lib/data/models/tts_model.dart`(`ModelKind.embedding` + `ModelRawFile` + `rawFiles` 多文件)
+  - `lib/data/model_catalog.dart`(嵌入模型条目 + ModelScope 基址常量 + `kDefaultEmbeddingModelId`)
+  - `lib/data/model_files_resolver.dart` / `model_manager.dart`(embedding 分支 + 多文件 raw 下载
+    + `_data` 伴生文件断言)
+  - `lib/data/conversation_store.dart`(DB 升版本 + `_migrations` 追加:KB/LTM/摘要表 +
+    `conversation_messages.session_id`)
+  - `lib/utils/conversation_service.dart`(`_buildLlmMessages` **改 async** + 检索注入 + 抽取触发)
+  - `lib/data/models/tts_settings.dart` + `lib/data/dva/app_models.dart`(8 个新设置,五处模式)
+  - `lib/data/app_dependencies.dart` + `lib/app.dart`(接线 + MultiProvider)
+  - `lib/pages/settings/sections/`(记忆 / 知识库两个新子页)+ `lib/pages/settings/settings_page.dart`
+  - `lib/l10n/app_zh.arb` + `app_en.arb`、`pubspec.yaml`(`flutter_onnxruntime`、`file_picker`)、
+    新增 `android/app/proguard-rules.pro`、`README.md`(模型源 + 隐私边界)

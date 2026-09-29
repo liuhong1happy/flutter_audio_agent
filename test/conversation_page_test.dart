@@ -68,4 +68,54 @@ void main() {
       tempDir.deleteSync(recursive: true);
     });
   });
+
+  testWidgets('文本模式零模型可用:只需配置大模型,不给模型下载入口', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final tempDir = Directory.systemTemp.createTempSync('conv_text_');
+    final deps = AppDependencies(
+      appLock: FakeAppLockService(),
+      engine: FakeTtsEngine(segmentDuration: Duration.zero),
+      downloader: FakeModelDownloader(),
+      chunker: TextChunker(enableJieba: false),
+      extractor: const ArchiveExtractor(useCompute: false),
+      player: FakeAudioPlaybackQueue(),
+      micRecorder: FakeMicRecorder(),
+      conversationPlayer: FakeAudioPlaybackQueue(),
+      conversationStore: MemoryConversationStore(),
+      modelsDirProvider: () async => Directory('${tempDir.path}/models'),
+      audioCacheDirProvider: () async => Directory('${tempDir.path}/audio'),
+      cloneRefsDirProvider: () async => Directory('${tempDir.path}/clone_refs'),
+    );
+    await tester.runAsync(() async => deps.init());
+
+    await tester.pumpWidget(TtsDemoApp(dependencies: deps));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tabConversation')));
+    await tester.pumpAndSettle();
+
+    // 音频模式 + 零模型:显示三件套下载,并提示还缺大模型。
+    expect(find.byKey(const ValueKey('initDownloadButton')), findsOneWidget);
+    expect(find.byKey(const ValueKey('configureLlmButton')), findsOneWidget);
+
+    // 切到文本模式(按图标点,不依赖语言):**不下载任何模型**,只显示"配置大模型"。
+    await tester.tap(find.byIcon(Icons.chat_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('initDownloadButton')), findsNothing,
+        reason: '文本模式不该给模型下载入口');
+    expect(find.byKey(const ValueKey('configureLlmButton')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sendTextButton')), findsNothing);
+
+    // 只填 API Key → 文本模式直接放行,连一个本地模型都没下。
+    await tester.runAsync(() async => deps.settings.setLlmApiKey('k'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('sendTextButton')), findsOneWidget);
+    expect(find.byKey(const ValueKey('initDownloadButton')), findsNothing);
+    expect(find.byKey(const ValueKey('configureLlmButton')), findsNothing);
+
+    await tester.runAsync(() async {
+      deps.conversationService.dispose();
+      await deps.streamingService.disposeAll();
+      tempDir.deleteSync(recursive: true);
+    });
+  });
 }

@@ -11,11 +11,20 @@ import 'dart:io';
 import 'package:flutter_tts_demo/utils/asr_service.dart';
 import 'package:flutter_tts_demo/utils/mic_recorder.dart';
 import 'package:flutter_tts_demo/utils/conversation_service.dart';
+import 'package:flutter_tts_demo/data/app_database.dart';
 import 'package:flutter_tts_demo/data/conversation_store.dart';
+import 'package:flutter_tts_demo/data/knowledge_store.dart';
+import 'package:flutter_tts_demo/data/memory_store.dart';
+import 'package:flutter_tts_demo/data/session_memory_store.dart';
+import 'package:flutter_tts_demo/utils/memory/embedding_engine.dart';
+import 'package:flutter_tts_demo/utils/memory/knowledge_service.dart';
+import 'package:flutter_tts_demo/utils/memory/memory_service.dart';
+import 'package:flutter_tts_demo/utils/memory/session_memory_service.dart';
 import 'package:flutter_tts_demo/data/app_paths.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_downloader.dart';
 import 'package:flutter_tts_demo/data/model_files_resolver.dart';
+import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
 import 'package:flutter_tts_demo/utils/llm_client.dart';
 import 'package:flutter_tts_demo/utils/llm_service.dart';
@@ -45,6 +54,11 @@ class AppDependencies {
     Future<Directory> Function()? audioCacheDirProvider,
     Future<Directory> Function()? cloneRefsDirProvider,
     Future<String> Function()? conversationDbPathProvider,
+    AppDatabase? appDatabase,
+    KnowledgeStore? knowledgeStore,
+    MemoryStore? memoryStore,
+    SessionMemoryStore? sessionMemoryStore,
+    EmbeddingEngine? embeddingEngine,
     TtsSettings? settings,
     VadEngine? vadEngine,
     AsrEngine? asrEngine,
@@ -77,7 +91,12 @@ class AppDependencies {
         _cloneRefsDirProvider =
             cloneRefsDirProvider ?? AppPaths.cloneRefsDir,
         _conversationDbPathProvider =
-            conversationDbPathProvider ?? AppPaths.conversationDbPath;
+            conversationDbPathProvider ?? AppPaths.conversationDbPath,
+        _injectedAppDatabase = appDatabase,
+        _knowledgeStore = knowledgeStore,
+        _memoryStore = memoryStore,
+        _sessionMemoryStore = sessionMemoryStore,
+        _embeddingEngine = embeddingEngine;
 
   static AppDependencies? _instance;
 
@@ -110,6 +129,11 @@ class AppDependencies {
   final Future<Directory> Function() _audioCacheDirProvider;
   final Future<Directory> Function() _cloneRefsDirProvider;
   final Future<String> Function() _conversationDbPathProvider;
+  final AppDatabase? _injectedAppDatabase;
+  final KnowledgeStore? _knowledgeStore;
+  final MemoryStore? _memoryStore;
+  final SessionMemoryStore? _sessionMemoryStore;
+  final EmbeddingEngine? _embeddingEngine;
 
   late final ModelManager modelManager;
   late final TtsStreamingService streamingService;
@@ -117,9 +141,25 @@ class AppDependencies {
   late final VoiceprintService voiceprintService;
   late final VoiceCloningService voiceCloningService;
   late final LlmService llmService;
+
+  /// 知识库检索(可空:测试未注入库时为 null,功能自动关闭)。
+  late final KnowledgeService? knowledgeService;
+
+  /// 长期记忆(可空)。
+  late final MemoryService? memoryService;
+
+  /// 短期记忆/会话分段(可空)。
+  late final SessionMemoryService? sessionMemoryService;
   late final ConversationService conversationService;
   late final MicRecorder micRecorder;
   late final Directory cloneRefsDir;
+
+  /// 全应用共享的 SQLite 库(会话历史 + 知识库 + 记忆)。
+  ///
+  /// **可能为 null**:测试中各 store 都以内存实现注入,不需要真库;
+  /// 而默认库路径来自 `path_provider`,在单元测试里不可用(见 init 中的说明)。
+  /// **生产环境走默认分支,必然非 null。**
+  AppDatabase? appDatabase;
   bool _initialized = false;
 
   /// 异步初始化(加载持久化设置、计算目录、装配依赖)。幂等。
@@ -175,8 +215,59 @@ class AppDependencies {
     // 不能依赖"先跑一次识别/录入"才把档案读出来。
     await voiceprintService.ensureStoreLoaded();
     llmService = LlmService(settings: settings, client: _llmClient);
-    final conversationStore = _conversationStore ??
-        SqliteConversationStore(await _conversationDbPathProvider());
+    // 会话历史 / 知识库 / 记忆 **共用同一个库**(迁移只能有一处,见 AppDatabase)。
+    //
+    // ⚠️ **必须在"确实需要真库"时才去问路径**。默认路径来自 `path_provider`,
+    // 单元测试里不可用(MissingPluginException)。原先的写法是
+    // `_conversationStore ?? SqliteConversationStore(await _conversationDbPathProvider())`
+    // —— `??` 的**短路求值**保证了"注入了内存 store 就不会碰路径";
+    // 重构时把 `await` 挪到 `??` 外面就会让所有注入内存 store 的测试全挂。
+    // 故这里显式保留这个惰性。
+    final injectedStore = _conversationStore;
+    final ConversationStore conversationStore;
+    if (injectedStore != null) {
+      appDatabase = _injectedAppDatabase;
+      conversationStore = injectedStore;
+    } else {
+      appDatabase =
+          _injectedAppDatabase ?? AppDatabase(await _conversationDbPathProvider());
+      conversationStore = SqliteConversationStore(appDatabase!);
+    }
+
+    // ── 知识库 / 记忆(v1.0.2)──────────────────────────────────────────
+    // 三者共用上面那个库。**可为 null**:测试常只注入内存 store、不碰真库,
+    // 此时这几个服务不装配,对话自动退化为 v1.0.1 行为(不注入任何片段),
+    // 而不是偷偷用一个"存完就没了"的内存实现假装在工作。
+    final db = appDatabase;
+    final knowledgeStore = _knowledgeStore ??
+        (db == null ? null : SqliteKnowledgeStore(db));
+    knowledgeService = knowledgeStore == null
+        ? null
+        : KnowledgeService(
+            store: knowledgeStore,
+            modelManager: modelManager,
+            settings: settings,
+            engine: _embeddingEngine,
+          );
+
+    final memStore =
+        _memoryStore ?? (db == null ? null : SqliteMemoryStore(db));
+    memoryService = memStore == null
+        ? null
+        : MemoryService(
+            store: memStore,
+            llm: llmService,
+            currentModelId: () =>
+                settings.embeddingModelId ?? kDefaultEmbeddingModelId,
+            engine: _embeddingEngine,
+            extractEveryTurns: settings.memoryExtractInterval,
+          );
+
+    final sessionStore = _sessionMemoryStore ??
+        (db == null ? null : SqliteSessionMemoryStore(db));
+    sessionMemoryService =
+        sessionStore == null ? null : SessionMemoryService(store: sessionStore, llm: llmService);
+
     conversationService = ConversationService(
       modelManager: modelManager,
       settings: settings,
@@ -189,6 +280,9 @@ class AppDependencies {
       streamingService: streamingService,
       mic: micRecorder,
       store: conversationStore,
+      knowledge: knowledgeService,
+      memory: memoryService,
+      sessionMemory: sessionMemoryService,
       vad: _vadEngine,
       player: _conversationPlayer,
     );

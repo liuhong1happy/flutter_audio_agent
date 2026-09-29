@@ -1,15 +1,12 @@
 {
   "@@locale": "zh",
   "appTitle": "Flutter TTS Demo",
-
   "synthesizeTab": "合成",
   "settingsTab": "设置",
   "modelsTab": "模型",
-
   "statusReady": "已选模型",
   "statusNoModel": "未选择模型",
   "statusNotDownloaded": "所选模型未下载",
-
   "phaseIdle": "就绪",
   "phasePreparing": "准备中…",
   "phaseSynthesizing": "合成中…",
@@ -17,21 +14,28 @@
   "@phasePlaying": {
     "description": "播放中显示当前段/总段数",
     "placeholders": {
-      "current": {"type": "int"},
-      "total": {"type": "int"}
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
     }
   },
   "phasePaused": "已暂停 {current}/{total}",
   "@phasePaused": {
     "description": "暂停时显示进度",
     "placeholders": {
-      "current": {"type": "int"},
-      "total": {"type": "int"}
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
     }
   },
   "phaseFinished": "播放完成",
   "phaseError": "出错",
-
   "pause": "暂停",
   "resume": "继续",
   "stop": "停止",
@@ -41,7 +45,6 @@
   "emptyTextError": "请输入文本",
   "genericError": "发生错误",
   "goSettings": "去设置",
-
   "settingsTitle": "设置",
   "sectionModel": "模型",
   "sectionTts": "语音合成",
@@ -58,27 +61,47 @@
   "modelSpeakerCount": "{name} ({count} 音色)",
   "@modelSpeakerCount": {
     "placeholders": {
-      "name": {"type": "String"},
-      "count": {"type": "int"}
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
     }
   },
   "modelNotSelected": "未选择模型,合成前需要先选择。",
   "speakerLabel": "说话人 (sid {sid})",
   "@speakerLabel": {
-    "placeholders": {"sid": {"type": "int"}}
+    "placeholders": {
+      "sid": {
+        "type": "int"
+      }
+    }
   },
   "speedLabel": "语速 {speed}x",
   "@speedLabel": {
     "description": "speed 为已格式化的语速字符串(如 1.50)",
-    "placeholders": {"speed": {"type": "String"}}
+    "placeholders": {
+      "speed": {
+        "type": "String"
+      }
+    }
   },
   "silenceLabel": "句间静音 {percent}%",
   "@silenceLabel": {
-    "placeholders": {"percent": {"type": "int"}}
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   },
   "threadLabel": "推理线程 {threads}",
   "@threadLabel": {
-    "placeholders": {"threads": {"type": "int"}}
+    "placeholders": {
+      "threads": {
+        "type": "int"
+      }
+    }
   },
   "downloadSource": "下载源",
   "mirrorSourceLabel": "下载源(国内网络自动回退代理)",
@@ -86,12 +109,15 @@
   "mirrorCustom": "自定义镜像前缀",
   "mirrorPrefixLabel": "镜像前缀(如 https://ghfast.top/)",
   "autoScroll": "自动滚动跟随朗读",
-
   "modelManageTitle": "模型管理",
   "diskUsage": "占用 {mb}MB",
   "@diskUsage": {
     "description": "mb 为已格式化的 MB 字符串(如 12.3)",
-    "placeholders": {"mb": {"type": "String"}}
+    "placeholders": {
+      "mb": {
+        "type": "String"
+      }
+    }
   },
   "clearAll": "清理全部缓存(删除所有模型)",
   "clearAllTitle": "清理全部缓存",
@@ -101,8 +127,7 @@
   "deleteModel": "删除模型",
   "cancelDownload": "取消下载",
   "download": "下载",
-
-  "bubblesEmptyHint": "输入文本后点击\"发送\",这里会逐条显示朗读气泡。",
+  "bubblesEmptyHint": "输入文本后点击\"发送\",\n这里会逐条显示朗读气泡。",
   "statsToggle": "耗时统计 ▸",
   "statTokenize": "分词",
   "statFirstAudio": "首词",
@@ -113,53 +138,59 @@
   "@statsLine": {
     "description": "气泡下方耗时统计(各指标为格式化后的时长字符串)",
     "placeholders": {
-      "tokenize": {"type": "String"},
-      "first": {"type": "String"},
-      "synthesis": {"type": "String"},
-      "playback": {"type": "String"},
-      "total": {"type": "String"}
+      "tokenize": {
+        "type": "String"
+      },
+      "first": {
+        "type": "String"
+      },
+      "synthesis": {
+        "type": "String"
+      },
+      "playback": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
     }
   },
-
   "streamingEmptyHint": "输入文本后点击\"合成并播放\",这里会逐句高亮显示朗读进度。",
-
   "kindLabelTts": "语音合成",
   "kindLabelAsr": "语音识别",
   "kindLabelSpeaker": "声纹",
   "kindLabelClone": "声音克隆",
   "kindLabelVad": "VAD",
-
   "conversationTab": "对话",
   "audioMode": "音频",
   "textMode": "文本",
   "textInputHint": "输入消息…",
-
   "listening": "聆听中…",
   "recognizing": "识别中…",
   "thinking": "思考中…",
   "speaking": "回复中…",
-
   "startConversation": "开始对话",
   "stopConversation": "停止对话",
   "clearConversation": "清空对话",
-
   "speakerUnknown": "未知用户",
   "currentSpeaker": "当前说话人:{name}",
   "@currentSpeaker": {
-    "placeholders": {"name": {"type": "String"}}
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "guestMode": "访客模式",
   "registerHint": "未识别说话人,可在声纹页注册",
   "speakerNoteHint": "备注(如:同事 / 家人)",
   "micMuted": "麦克风已静音",
   "micUnmuted": "麦克风已恢复",
-
   "cloneVoicesTitle": "克隆音",
   "newCloneVoice": "新建克隆音",
   "cloneNameHint": "克隆音名字",
   "recordReferenceHint": "录 3–10 秒参考语音",
   "noCloneVoices": "尚无克隆音,点右下角新建。",
-
   "voiceprintTitle": "声纹",
   "enrollSpeaker": "注册说话人",
   "identifyTest": "测试识别",
@@ -167,11 +198,14 @@
   "enrollNote": "备注",
   "noSpeakers": "尚未注册说话人。",
   "enrollSegmentsHint": "请录 2–3 段语音(每段 2 秒以上)",
-
   "voiceprintModelLabel": "声纹模型",
   "currentVoiceprintModel": "当前声纹模型:{name}",
   "@currentVoiceprintModel": {
-    "placeholders": {"name": {"type": "String"}}
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "voiceprintModelIsolationHint": "不同模型的声纹档案互相独立,嵌入不可跨模型比较。",
   "voiceprintGateLabel": "声纹门禁(仅注册者可对话)",
@@ -186,8 +220,12 @@
   "otherVoiceprintModelHint": "另有 {count} 位注册在「{model}」下",
   "@otherVoiceprintModelHint": {
     "placeholders": {
-      "count": {"type": "int"},
-      "model": {"type": "String"}
+      "count": {
+        "type": "int"
+      },
+      "model": {
+        "type": "String"
+      }
     }
   },
   "bindCloneVoice": "绑定克隆音",
@@ -195,9 +233,12 @@
   "unbind": "解绑",
   "cloneVoiceBound": "克隆音:{name}",
   "@cloneVoiceBound": {
-    "placeholders": {"name": {"type": "String"}}
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
-
   "conversationSettingsTitle": "对话设置",
   "llmProvider": "服务商",
   "llmProviderCustom": "自定义",
@@ -205,6 +246,26 @@
   "llmApiKey": "API Key",
   "llmModel": "模型",
   "llmSystemPrompt": "系统提示词",
+  "llmConfigListTitle": "已配置的大模型",
+  "llmAddConfig": "添加配置",
+  "llmNewConfig": "新建大模型配置",
+  "llmEditConfig": "编辑配置",
+  "llmConfigName": "名称",
+  "llmConfigNameHint": "如:工作 / 个人",
+  "llmConfigActive": "已启用",
+  "llmSetActive": "设为启用",
+  "llmConfigIncomplete": "未填 API Key",
+  "llmDeleteConfig": "删除该配置",
+  "llmDeleteConfigConfirm": "删除「{name}」这条配置?",
+  "@llmDeleteConfigConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "llmKeepOneConfig": "至少保留一条配置,不能全部删除",
+  "llmSystemPromptHint": "可选。留空则使用内置的默认助手人设。",
   "asrModelLabel": "识别模型 (ASR)",
   "vadThreshold": "VAD 阈值",
   "vadMinSilence": "静音时长(秒)",
@@ -212,18 +273,31 @@
   "voiceSelectLabel": "对话声音",
   "voiceModelLabel": "模型音色",
   "voiceCloneLabel": "克隆音",
-
   "initModelsTitle": "初始化对话",
   "initModelsHint": "首次使用需下载语音对话所需模型(约 250MB)。",
   "initReady": "已就绪",
   "downloadInitialModels": "一键下载",
+  "initLlmTitle": "配置大模型",
+  "initTextModeHint": "文本模式只需配置大模型,无需下载任何本地模型。",
+  "initLlmMissing": "语音对话与文本对话都需要大模型,尚未配置。",
+  "initLlmOnlyLeft": "模型已就绪,还差配置大模型。",
+  "goConfigureLlm": "去配置大模型",
+  "initSynthTitle": "初始化语音合成",
+  "initSynthHint": "首次使用需先下载并启用一个语音合成模型。",
+  "initSynthNotSelected": "尚未选择语音合成模型,推荐先用体积最小的:",
+  "initSynthNotDownloaded": "所选模型尚未下载:",
+  "initSynthDownloadAndEnable": "下载并启用",
+  "initSynthMoreModels": "更多模型(去设置)",
   "initProgress": "下载中 {percent}%",
   "@initProgress": {
-    "placeholders": {"percent": {"type": "int"}}
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   },
   "initRetry": "重试",
   "initDone": "初始化完成",
-
   "micPermissionDenied": "麦克风权限被拒绝",
   "emptyAsrText": "未识别到语音",
   "llmError": "LLM 调用失败",
@@ -232,13 +306,106 @@
   "recording": "录音中…",
   "save": "保存",
   "delete": "删除",
-
   "conversationHistory": "历史记录",
   "historyEmpty": "暂无历史对话",
   "deleteMessageConfirm": "删除这条消息?",
   "loadOlder": "加载更早",
   "messageCount": "{count} 条消息",
   "@messageCount": {
-    "placeholders": {"count": {"type": "int"}}
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sectionKnowledge": "知识库",
+  "sectionMemory": "记忆",
+  "kbEnabledLabel": "启用知识库检索",
+  "kbEnabledHint": "对话时自动检索导入的文档并注入提示词",
+  "kbTopKLabel": "注入片段数",
+  "kbScoreThresholdLabel": "相似度阈值",
+  "kbScoreThresholdHint": "低于此值的片段不注入。实测同义句约 0.75-0.81、异义句约 0.24-0.29。",
+  "kbEmbeddingModelLabel": "嵌入模型",
+  "kbNoEmbeddingModel": "尚未下载嵌入模型,下载后才能索引与检索。",
+  "kbManageTitle": "知识库管理",
+  "kbImportText": "导入文本",
+  "kbImportTitleHint": "标题(如:产品手册)",
+  "kbImportContentHint": "粘贴要记入知识库的文本…",
+  "kbImport": "导入",
+  "kbImportEmpty": "请填写标题与内容",
+  "kbImportDone": "已导入 {count} 个片段,正在后台建立索引",
+  "kbEmpty": "知识库还是空的,先导入一份文档吧",
+  "kbIndexing": "索引中 {done}/{total}",
+  "kbIndexed": "已索引 {count} 个片段",
+  "kbDelete": "删除文档",
+  "kbDeleteConfirm": "删除后该文档的片段会一并移除,确定吗?",
+  "kbSearchProbe": "检索试跑",
+  "kbSearchHint": "输入一句话,看看能检索到什么",
+  "kbSearchNoResult": "没有检索到相关片段",
+  "kbSearchScore": "相似度 {score}",
+  "kbIndexPendingHint": "有 {count} 个片段待索引",
+  "memoryEnabledLabel": "启用长期记忆",
+  "memoryEnabledHint": "从对话中提炼关于说话人的事实。会额外消耗大模型 token(你自付)。",
+  "memoryExtractIntervalLabel": "每几轮抽取一次",
+  "memoryTopKLabel": "注入记忆条数",
+  "memoryManageTitle": "记忆管理",
+  "memoryEmpty": "还没有任何记忆",
+  "memoryDeleteAll": "清空该说话人的记忆",
+  "memoryDeleteAllConfirm": "清空后无法恢复,确定吗?",
+  "memorySpeakerLabel": "说话人",
+  "memoryCount": "{count} 条",
+  "kbRetrievedCount": "引用了 {count} 条资料",
+  "rememberThis": "记住这条",
+  "@kbImportDone": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@kbIndexing": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "@kbIndexed": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@kbSearchScore": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "@kbIndexPendingHint": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@kbRetrievedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "@memoryCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

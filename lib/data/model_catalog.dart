@@ -35,6 +35,26 @@ const Map<String, String> kDefaultConversationModelIds = {
   'tts': 'vits-piper-zh_CN-xiao_ya-medium-int8',
 };
 
+/// 合成页初始化推荐的默认模型(体积最小、加载最快,适合先跑通全流程)。
+///
+/// 值恰好等于 `kDefaultConversationModelIds['tts']`,也等于 `ModelCatalog.all.first`,
+/// 但**显式写成常量**:目录重排不该静默改掉"推荐给用户的默认项"。
+const String kDefaultSynthModelId = 'vits-piper-zh_CN-xiao_ya-medium-int8';
+
+/// 文本嵌入模型的 ModelScope 基址。
+///
+/// ⚠️ 用 `Xenova/bge-small-zh-v1.5`(**单文件** ONNX)。**勿换**成
+/// `onnx-community/bge-small-zh-v1.5-ONNX` —— 那份是 `.onnx`(168KB,仅图)+
+/// `.onnx_data`(23.8MB,权重)的**外置数据**拆分格式,ORT 要求两者同名同目录,
+/// 只下一个必然加载失败,而且报错不可读。
+///
+/// 另注:`huggingface.co` 本机直连不通,`modelscope.cn` 可用(2026-09-29 实测)。
+const String kEmbeddingModelBase =
+    'https://modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master';
+
+/// 默认文本嵌入模型 id。
+const String kDefaultEmbeddingModelId = 'bge-small-zh-v1.5';
+
 /// 首个声纹模型(= 引入多模型选择之前唯一存在的那个)。
 ///
 /// 专供"老档案迁移":旧数据的声纹档案没有 modelId 字段,一律归属此模型。
@@ -185,6 +205,45 @@ class ModelCatalog {
       kind: ModelKind.pocket,
       speakers: 0,
       sampleRate: 24000,
+    ),
+    // ── 文本嵌入(知识库 / 记忆检索)──────────────────────────────────
+    // 与上面所有条目不同:它来自 **ModelScope** 而非 GitHub release
+    // (huggingface.co 直连不通;modelscope.cn 实测 200 / 支持 Range / 24MB 约 2.6s)。
+    // 且是**多文件 raw 下载**(onnx + tokenizer + vocab + config)。
+    TtsModel(
+      id: kDefaultEmbeddingModelId,
+      displayName: 'BGE Small 中文(文本嵌入)',
+      description: '本地文本语义向量,512 维。供知识库与长期记忆检索使用,全程离线。',
+      // 多文件条目:`url` 为**基址**,实际下载地址 = `$url/$remotePath`。
+      url: kEmbeddingModelBase,
+      tarBz2SizeBytes: 0, // 体积由 rawFiles 求和(totalSizeBytes / sizeLabel)
+      license: 'MIT',
+      kind: ModelKind.embedding,
+      downloadFormat: ModelDownloadFormat.rawFile,
+      rawFiles: [
+        ModelRawFile(
+          remotePath: 'onnx/model_quantized.onnx',
+          fileName: 'model_quantized.onnx',
+          sizeBytes: 24010842,
+        ),
+        ModelRawFile(
+          remotePath: 'tokenizer.json',
+          fileName: 'tokenizer.json',
+          sizeBytes: 439125,
+        ),
+        ModelRawFile(
+          remotePath: 'vocab.txt',
+          fileName: 'vocab.txt',
+          sizeBytes: 109540,
+        ),
+        ModelRawFile(
+          remotePath: 'config.json',
+          fileName: 'config.json',
+          sizeBytes: 716,
+        ),
+      ],
+      speakers: 0,
+      sampleRate: 0,
     ),
   ];
 

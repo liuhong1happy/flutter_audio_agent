@@ -51,6 +51,40 @@ dependencies:
   flutter_dva: ^1.0.9
   intl: any # gen-l10n 生成代码所需,版本由 Flutter SDK 对齐
   local_auth: ^3.0.2
+  file_picker: ^13.1.0 # 知识库导入 txt/md(走 Android SAF,免存储权限)
+  # ── 本地文本向量化:两条路都已评估,结论见 TODO.md 坑 19 ────────────────
+  # ① `flutter_onnxruntime`:**已证不可用**。与 sherpa 的 libonnxruntime.so 同 soname,
+  #    但符号版本节点不同(VERS_1.23.0 vs VERS_1.27.1)⇒ 同一 APK 内无法共存。
+  # ② `flutter_embedder`:用 ort crate 的 load-dynamic(运行时 dlopen),**理论上有机会**
+  #    指向 sherpa 已有的 ORT 从而绕开冲突 —— 但其内置 cargokit 用了 Gradle 9 已移除的
+  #    `project.exec()`,在本项目(Gradle 9.1.0 + AGP 9.0.1)上**编不过**;且需要 Rust
+  #    工具链。**故暂未引入**,若要走这条需先修 cargokit + 装 Rust。
+  # 因此本地检索优先走纯 Dart BM25(零原生依赖、完全离线)。
+  #
+  # ③ 现状:指向 **Gitee 上的 fork**,补丁以 commit 形式存在 fork 里(不再 vendor 源码)。
+  #    fork: https://gitee.com/liuhong1happy/flutter_embedder
+  #    补丁内容与原因见该仓库的 `PATCHES.md`(共 2 个提交):
+  #      ① cargokit 的 `project.exec()` → `providers.exec{}.result.get()`
+  #         (Gradle 9 已移除前者,本项目是 Gradle 9.1.0 + AGP 9.0.1,不改则构建失败)
+  #      ② 三处 `java.nio.file.Path` → `String`(providers.exec 需序列化参数)
+  #      ③ `compileSdkVersion` 33 → 36、`minSdkVersion` 19 → 23、Java 8 → 17
+  #    ⚠️ 用 **HTTPS** 而非 SSH:HTTPS 可匿名读取,CI/同事无需配密钥(SSH 只在推送补丁时需要)。
+  #    ⚠️ 钉死 commit sha(不用分支名):否则上游一动,构建内容就悄悄变了。
+  #    升级上游时:把新版本合进 fork、重打补丁、再把下面的 ref 换成新 sha。
+  flutter_embedder:
+    git:
+      url: https://gitee.com/liuhong1happy/flutter_embedder.git
+      ref: d5b6433b8f664871efab05250bea649c1f510231
+
+# flutter_rust_bridge 要求 **codegen 版本与 Dart 运行时版本严格一致**。
+# `flutter_embedder` 的 Rust 侧钉死 `flutter_rust_bridge = "=2.11.1"`
+# (见 third_party/flutter_embedder/rust/Cargo.toml),而它 Dart 侧只声明 `^2.11.1`,
+# 会被解析到更新版(实测 2.13.0)⇒ 运行时报:
+#   Bad state: flutter_embedder's codegen version (2.11.1) should be the same as
+#   runtime version (2.13.0)
+# 故在此把 Dart 侧钉到 2.11.1。升级 `flutter_embedder` 时必须同步核对这里。
+dependency_overrides:
+  flutter_rust_bridge: 2.11.1
 
 dev_dependencies:
   flutter_test:

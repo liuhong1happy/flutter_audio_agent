@@ -25,6 +25,12 @@ class TtsDemoApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: dependencies.voiceCloningService),
         ChangeNotifierProvider.value(value: dependencies.voiceprintService),
         ChangeNotifierProvider.value(value: dependencies.conversationService),
+        // 知识库 / 记忆服务:**可能为 null**(测试里常只注入内存 store)。
+        // 只在非空时注入,页面侧用 context.watch 取不到就说明功能未启用。
+        if (dependencies.knowledgeService != null)
+          ChangeNotifierProvider.value(value: dependencies.knowledgeService!),
+        if (dependencies.memoryService != null)
+          ChangeNotifierProvider.value(value: dependencies.memoryService!),
       ],
       child: MaterialApp(
         // title 为 OS 任务管理器名称,品牌名无需随语言变化;

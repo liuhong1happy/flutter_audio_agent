@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -14,9 +15,12 @@ import 'package:flutter_tts_demo/utils/app_lock_service.dart';
 import 'package:flutter_tts_demo/utils/mic_recorder.dart';
 import 'package:flutter_tts_demo/data/models/conversation_message.dart';
 import 'package:flutter_tts_demo/data/conversation_store.dart';
+import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_downloader.dart';
 import 'package:flutter_tts_demo/data/model_files_resolver.dart';
 import 'package:flutter_tts_demo/utils/llm_client.dart';
+import 'package:flutter_tts_demo/utils/memory/embedding_engine.dart';
+import 'package:flutter_tts_demo/utils/memory/vector_store.dart';
 import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/data/models/tts_settings.dart';
 import 'package:flutter_tts_demo/utils/engines/asr_engine.dart';
@@ -190,6 +194,22 @@ class FakeModelDownloader implements ModelDownloader {
   final Duration? delay;
   final List<String> downloadedUrls = [];
 
+  /// 若 [url] 是某个**多文件裸模型**(文本嵌入模型)声明的成员,
+  /// 返回它声明的**精确体积**;否则返回 null。
+  ///
+  /// 为什么必须精确:真实链路 [ModelManager._downloadMultiFileRaw] 会**逐文件比对
+  /// 体积**(多下一个字节、少一个字节都报错),因为这类模型的体积是已知且确定的,
+  /// 精确匹配才能抓住"网关把请求换成 HTML 拦截页"。假下载器若按固定 2048 字节写,
+  /// "下载嵌入模型"这条链路在测试里会永远停在"不完整"。
+  static int? rawFileSizeFor(String url) {
+    for (final m in ModelCatalog.all) {
+      for (final f in m.rawFiles ?? const <ModelRawFile>[]) {
+        if (url.endsWith(f.remotePath)) return f.sizeBytes;
+      }
+    }
+    return null;
+  }
+
   @override
   Future<void> download({
     required String url,
@@ -204,6 +224,27 @@ class FakeModelDownloader implements ModelDownloader {
 
     final file = File(savePath);
     await file.parent.create(recursive: true);
+
+    // 多文件裸模型:按声明体积**分块**写(避免为 24MB 的模型一次性开一个大 buffer),
+    // 并上报真实进度,让"下载中 → 就绪"在 UI 上可观测。
+    final rawSize = rawFileSizeFor(url);
+    if (rawSize != null) {
+      const chunkBytes = 1 << 20;
+      var written = 0;
+      final sink = file.openWrite();
+      try {
+        while (written < rawSize) {
+          final n = math.min(chunkBytes, rawSize - written);
+          sink.add(List<int>.filled(n, 7));
+          written += n;
+          onProgress?.call(written, rawSize);
+        }
+      } finally {
+        await sink.close();
+      }
+      return;
+    }
+
     // 裸文件(rawFile,URL 以 .onnx 结尾)写一段足够大的原始字节;
     // tar.bz2 模型写内含占位模型文件的归档。
     if (url.endsWith('.onnx')) {
@@ -491,6 +532,13 @@ class FakeLlmClient implements LlmClient {
   final List<String> chunks;
   final List<List<LlmMessage>> capturedMessages = [];
 
+  /// 非空则本次调用抛错 —— 用于验证"LLM 失败要静默跳过、不阻塞对话"。
+  String? error;
+
+  /// 若提供,则按入参动态产出(用于"第二次摘要的内容与第一次不同"这类场景);
+  /// 为 null 时固定产出 [chunks]。
+  List<String> Function(List<LlmMessage> messages)? responder;
+
   @override
   Stream<String> streamChat({
     required String baseUrl,
@@ -500,7 +548,10 @@ class FakeLlmClient implements LlmClient {
     CancelToken? cancel,
   }) async* {
     capturedMessages.add(messages);
-    for (final c in chunks) {
+    final err = error;
+    if (err != null) throw StateError(err);
+    final out = responder?.call(messages) ?? chunks;
+    for (final c in out) {
       yield c;
     }
   }
@@ -558,4 +609,77 @@ class MemoryConversationStore implements ConversationStore {
 
   @override
   Future<void> close() async {}
+}
+
+/// 确定性假嵌入引擎:向量由"字符袋"决定 —— 共享字符越多的文本余弦越高。
+///
+/// 不用随机向量的原因:检索类测试需要**可预测的相似度**(比如"查'语音对话系统'
+/// 应该命中讲语音对话的那块,而不是讲红烧肉的那块")。随机向量做不到这一点。
+class FakeEmbeddingEngine implements EmbeddingEngine {
+  FakeEmbeddingEngine({this.dim = 8});
+
+  final int dim;
+
+  bool _loaded = false;
+  int loadCalls = 0;
+  int unloadCalls = 0;
+
+  /// 设为 true 则 load 抛错(验证"不静默降级")。
+  bool failOnLoad = false;
+
+  /// 这些文本嵌入时抛错(验证逐条定位坏块)。
+  final Set<String> failTexts = {};
+
+  /// 每次 embed 的入参(验证批大小与批次数)。
+  final List<List<String>> embedCalls = [];
+
+  /// 每次 embed **开始前**回调(第几次从 0 计)。
+  ///
+  /// 用于确定性地测试"运行中取消":在回调里调 `cancelBackfill()`,
+  /// 就能让取消恰好发生在某一批之后,不依赖时序运气。
+  void Function(int callIndex)? onEmbedCall;
+
+  EmbeddingTiming? _lastTiming;
+
+  @override
+  bool get isLoaded => _loaded;
+
+  @override
+  EmbeddingTiming? get lastTiming => _lastTiming;
+
+  @override
+  Future<void> load({
+    required String modelPath,
+    required String tokenizerPath,
+  }) async {
+    loadCalls++;
+    if (failOnLoad) throw StateError('模拟:嵌入模型加载失败');
+    _loaded = true;
+  }
+
+  @override
+  Future<List<Float32List>> embed(List<String> texts) async {
+    if (!_loaded) throw StateError('嵌入引擎未加载');
+    onEmbedCall?.call(embedCalls.length);
+    embedCalls.add(List.of(texts));
+    final out = <Float32List>[];
+    for (final t in texts) {
+      if (failTexts.contains(t)) {
+        throw StateError('模拟:嵌入失败');
+      }
+      final v = Float32List(dim);
+      for (final r in t.runes) {
+        v[r % dim] += 1;
+      }
+      out.add(normalize(v));
+    }
+    _lastTiming = EmbeddingTiming(textCount: texts.length, elapsedMs: 1);
+    return out;
+  }
+
+  @override
+  Future<void> unload() async {
+    unloadCalls++;
+    _loaded = false;
+  }
 }

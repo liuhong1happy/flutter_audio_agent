@@ -119,10 +119,22 @@ class ModelManager extends ChangeNotifier {
 
   /// 下载地址候选列表(多镜像自动回退)。
   ///
-  /// 顺序:手动镜像(设置里填)→ 国内 GitHub 代理 → 直连 GitHub(兜底)。
+  /// 顺序:手动镜像(设置里填)→ 国内 GitHub 代理 → 直连(兜底)。
   /// 国内网络直连 GitHub 常失败,代理列表保证有可用的源。
+  ///
+  /// ⚠️ **代理只对 GitHub 地址生效**。嵌入模型走的是 **ModelScope**
+  /// (`modelscope.cn`,国内直连可用),把它的 URL 套上 GitHub 代理前缀会得到
+  /// 一个必然失败的地址,既拖慢下载又污染错误信息。
   List<String> downloadCandidates(TtsModel model) {
     final list = <String>[];
+    final isGitHub = model.url.contains('github.com');
+
+    if (!isGitHub) {
+      // 非 GitHub(如 ModelScope):直连即可,不做代理回退。
+      list.add(model.url);
+      return list;
+    }
+
     final manual = settings.mirrorPrefix.trim();
     if (manual.isNotEmpty) {
       list.add('$manual${model.url}');
@@ -158,6 +170,15 @@ class ModelManager extends ChangeNotifier {
 
     try {
       final isRaw = model.downloadFormat == ModelDownloadFormat.rawFile;
+
+      // 多文件 raw 下载(文本嵌入模型:onnx + tokenizer + vocab + config)。
+      // 走单独分支:每个文件独立下载 + 独立体积校验,且天然可续(已完整的跳过)。
+      final rawFiles = model.rawFiles;
+      if (rawFiles != null && rawFiles.isNotEmpty) {
+        await _downloadMultiFileRaw(model, rawFiles, cancelToken);
+        await _finishDownload(model);
+        return;
+      }
 
       // 多镜像回退:依次尝试,成功即止。
       final candidates = downloadCandidates(model);
@@ -222,21 +243,7 @@ class ModelManager extends ChangeNotifier {
       }
 
       // 校验关键文件是否齐全 + 主模型非平凡大小(防止损坏/截断的空文件)。
-      final resolved = resolver.resolve(model, modelUnpackedDir(model));
-      if (resolved == null || !resolved.isComplete) {
-        throw StateError('模型文件不完整: ${model.id}');
-      }
-      if (resolved.modelPath != null &&
-          await _fileSizeBelow(resolved.modelPath!, _minOnnxBytes)) {
-        throw StateError('模型主文件异常(过小,疑似损坏),请重新下载: ${model.id}');
-      }
-
-      _downloaded.add(model.id);
-      await _persistDownloaded();
-      _setState(model, const ModelDownloadState(
-        status: DownloadStatus.ready,
-        progress: 1.0,
-      ));
+      await _finishDownload(model);
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
         _setState(model, const ModelDownloadState());
@@ -253,6 +260,89 @@ class ModelManager extends ChangeNotifier {
       ));
     } finally {
       _cancelTokens.remove(model.id);
+    }
+  }
+
+  /// 下载后的统一收尾:齐全性校验 → 记录已下载 → 置 ready。
+  ///
+  /// 抽出来是因为现在有两条下载路径(单文件/压缩包、多文件 raw),
+  /// 收尾逻辑必须只有一份 —— 否则容易只修好其中一条。
+  Future<void> _finishDownload(TtsModel model) async {
+    final resolved = resolver.resolve(model, modelUnpackedDir(model));
+    if (resolved == null || !resolved.isComplete) {
+      throw StateError('模型文件不完整: ${model.id}');
+    }
+    if (resolved.modelPath != null &&
+        await _fileSizeBelow(resolved.modelPath!, _minOnnxBytes)) {
+      throw StateError('模型主文件异常(过小,疑似损坏),请重新下载: ${model.id}');
+    }
+    _downloaded.add(model.id);
+    await _persistDownloaded();
+    _setState(model, const ModelDownloadState(
+      status: DownloadStatus.ready,
+      progress: 1.0,
+    ));
+  }
+
+  /// 多文件 raw 下载(文本嵌入模型)。
+  ///
+  /// 每个文件**逐个下载 + 精确体积校验**:
+  /// 这类模型的文件体积是已知且确定的,用精确匹配做完整性判断比"大于 1KB"强得多,
+  /// 而且能抓住**网关把请求换成 HTML 拦截页**这种情况(实测过:hf-mirror 之外的源
+  /// 有时返回 200 但内容是 HTML)。
+  ///
+  /// 天然可续:已存在且体积正确的文件直接跳过,配合下载器的 Range 续传,
+  /// 中断后重跑只补缺的部分。
+  Future<void> _downloadMultiFileRaw(
+    TtsModel model,
+    List<ModelRawFile> files,
+    CancelToken cancelToken,
+  ) async {
+    final dir = modelUnpackedDir(model);
+    await Directory(dir).create(recursive: true);
+
+    final total = model.totalSizeBytes;
+    var doneBytes = 0;
+
+    for (final f in files) {
+      if (cancelToken.isCancelled) {
+        throw StateError('已取消');
+      }
+      final target = p.join(dir, f.fileName);
+      final targetFile = File(target);
+
+      // 已完整则跳过(断点续:已下好的文件不重下)。
+      if (await targetFile.exists() && await targetFile.length() == f.sizeBytes) {
+        doneBytes += f.sizeBytes;
+        continue;
+      }
+
+      final url = '${model.url}/${f.remotePath}';
+      await downloader.download(
+        url: url,
+        savePath: target,
+        cancelToken: cancelToken,
+        onProgress: (received, fileTotal) {
+          // 总进度 = 已完成文件 + 当前文件进度。fileTotal 为 0 时退化为按文件计数。
+          final progress = total > 0
+              ? (doneBytes + received) / total
+              : (files.indexOf(f) / files.length);
+          _setState(model, ModelDownloadState(
+            status: DownloadStatus.downloading,
+            progress: progress.clamp(0.0, 1.0),
+          ));
+        },
+      );
+
+      final actual = await targetFile.length();
+      if (actual != f.sizeBytes) {
+        // 保留文件以便续传,但明确报错 —— 不静默当成成功。
+        throw StateError(
+          '${f.fileName} 体积不符(期望 ${f.sizeBytes},实际 $actual),'
+          '可能是下载源返回了错误页',
+        );
+      }
+      doneBytes += f.sizeBytes;
     }
   }
 

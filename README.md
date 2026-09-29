@@ -6,12 +6,15 @@
 
 1. **底部 Tab 布局** — 合成 / 对话 / 设置三个平级 Tab,`IndexedStack` 常驻各页,播放中切换不中断。
 2. **文本转语音(聊天式界面)** — 底部输入框;每次发送 = 一条气泡(整段文本),正在读的气泡内
-   **逐词高亮**(卡拉OK式);点击气泡可重新朗读该条。
+   **逐词高亮**(卡拉OK式);点击气泡可重新朗读该条。没有可用模型时显示**初始化卡片**
+   (推荐最小体积的模型,一键"下载并启用"),而不是等用户点了发送才报错。
 3. **统一设置中心(两级)** — 设置页首页为各大类 ListItem(语音合成 / 语音识别 / VAD /
    声纹识别 / 大模型 / 通用),点击进入子页配置各自参数 + **各自模型下载**;通用页含清理缓存。
 4. **语音对话(双模式)** — 第 2 Tab「对话」:
    - **音频模式**:语音 → 离线 ASR → 声纹识别 → 在线 LLM → TTS 语音回复,仅显示最后一轮;
    - **文本模式**:打字 → 在线 LLM 纯文本回复(不转 TTS),显示全部历史。
+   两种模式的就绪条件**不同**:文本模式只用 LLM,**一个本地模型都不用下载**;音频模式才需要
+   VAD/ASR/TTS 三件套。两种模式都需要配好大模型。
    会话历史为**单一时间线**(多说话人,未知说话人访客模式),存 SQLite 并按时间排序、分页。
 5. **声音克隆** — PocketTTS 零样本克隆音(录 3–10s 参考)。对话中可选**模型音色或克隆音**,
    也可把克隆音**绑定到某位说话人**——谁说话就用谁的克隆音回话。
@@ -22,8 +25,10 @@
    不问 LLM**,只播本地合成的拒绝语。(识别先于 ASR,所以拒绝比放行更省算力。)
 8. **声纹写操作保护** — 注册 / 删除声纹、调声纹阈值前要求设备认证(指纹 / 人脸 / 系统 PIN,
    `local_auth`),避免本机任何人都能注册声纹后通过识别。
-9. **多服务商 LLM** — OpenAI 兼容接口,内置 DeepSeek(`deepseek-v4-flash`/`deepseek-v4-pro`)/
-   Moonshot(Kimi)/ 智谱(GLM)/ 通义千问(Qwen)预设,可自定义 baseUrl / apiKey / 模型。
+9. **多服务商 LLM(配置列表)** — OpenAI 兼容接口。大模型是**可逐条添加的配置列表**
+   (如"工作 / 个人"各一条),每条含 地址 / API Key / 模型 / **系统提示词**,其中**一条启用**
+   为默认;对话只走启用那条。切换服务商(DeepSeek / Moonshot(Kimi)/ 智谱(GLM)/ 通义千问(Qwen))
+   会替换该条的地址与默认模型,也支持完全自定义。系统提示词可选,留空用内置人设。
 10. **历史浏览 + 管理** — 对话页 Header 左侧历史入口,分页「加载更早」;长按气泡删除单条消息。
 
 > **隐私说明**:LLM 是唯一联网组件(OpenAI 兼容第三方服务);ASR/TTS/克隆/声纹/VAD 全部离线。
@@ -95,6 +100,38 @@ flutter run            # 需已连接 Android 设备/模拟器(或配置 iOS 模
 注入 LLM 上下文;想要门禁就在同一页打开「声纹门禁」。**注册/删除声纹前会要求设备认证**,
 设备没设指纹/PIN 时会弹说明让你显式关闭该保护(不会静默放行)。
 
+知识库与记忆:设置 → 知识库 → 下载嵌入模型(BGE Small 中文,约 24MB)→
+「知识库管理」导入文本(或从设置页导入);对话时自动检索并注入相关片段。
+设置 → 记忆 可开关长期记忆(它会让每轮对话多消耗一点 LLM token)。
+
+### ⚠️ 构建前置:Android 需要 Rust 工具链
+
+本项目依赖 `flutter_embedder`(本地文本向量化),它用 **cargokit 从源码编译 Rust**,
+而且该依赖指向我们的 Gitee fork(见 `pubspec.yaml` 与 `third_party` 相关说明)。
+**全新机器上必须先装好下列工具,否则 `flutter build apk` 会失败:**
+
+| 组件 | 版本/说明 |
+|---|---|
+| Rust | `stable-x86_64-pc-windows-gnu`(Windows)/ 其它平台用默认宿主即可 |
+| 宿主机 C 链接器 | Windows 需 **MinGW-w64(gcc)**;Rust 编 build-script 与 proc-macro 要用它 |
+| rustup 默认宿主 | Windows 上必须是 gnu:`rustup set default-host x86_64-pc-windows-gnu` |
+| Android NDK | 已随 Flutter 安装即可,但**目录下必须有 `package.xml`** |
+
+```bash
+# Windows 示例(参考;其它平台用各自包管理器)
+winget install Rustlang.Rustup
+winget install BrechtSanders.WinLibs.POSIX.UCRT     # gcc
+rustup set default-host x86_64-pc-windows-gnu
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+```
+
+> **NDK 的 `package.xml`**:cargokit 用 `<sdk>/ndk/<版本>/package.xml` 是否存在来判断
+> "NDK 已安装";本机 NDK 只有 `source.properties` 时会误判为未安装,进而去调
+> `sdkmanager`(而 `cmdline-tools` 往往也没装)而报错。若遇到,手动补一个同结构的
+> `package.xml` 即可(内容与 `source.properties` 里的版本一致)。
+>
+> 首次构建会为每个 ABI 各编一遍 Rust,耗时较长;之后有增量缓存会快很多。
+
 ## 代码结构
 
 ```
@@ -118,7 +155,8 @@ lib/
 │   └── (services / app_lock_service / 文本管线 / wav / isolate_bridge / 播放器 / llm / mic)
 └── l10n/                         # gen-l10n 生成(勿手改)
 test/                             # 单元测试 + widget 冒烟(fakes 见 test/support/)
-patrol_test/                      # Patrol 集成测试(app_smoke / conversation / settings)
+patrol_test/                      # Patrol 集成测试(app_smoke / conversation / settings /
+                                  #   knowledge / memory / context_injection)
 scripts/                          # build-android.sh / build-ios.sh / adhocExportOptions.plist
 assets/icon/                      # app_icon.svg(设计源)+ app_icon.png(1024)
 ```
@@ -152,30 +190,58 @@ flutter test
 
 ### Patrol 集成测试(需求 5)
 
+一条命令跑全套并**自动出截图**(推荐;需已连接 Android 设备/模拟器):
+
+```bash
+sh scripts/patrol_e2e.sh                   # 全部 7 个套件,截图默认开
+sh scripts/patrol_e2e.sh knowledge memory  # 只跑指定套件(名字可省 _test)
+sh scripts/patrol_e2e.sh --no-screenshots  # 关截图:测试内不渲染不落盘,跑完卸载
+sh scripts/patrol_e2e.sh -d emulator-5554  # 指定设备(不给则自动取第一个 adb 设备)
+```
+
+- **截图默认开**,落在 `screenshots/<套件>/<名字>.png`(`.gitignore` 已忽略);
+  每个套件的完整输出在 `build/e2e_logs/<套件>.log`;有套件失败时脚本退出码非 0。
+- 截图开关在测试侧是 `takeScreenshot` 里的 `--dart-define=E2E_SCREENSHOTS=false`:
+  关掉后它**只跳过渲染与落盘,仍会 `pumpAndSettle`** —— 刻意的,开关不该改变测试时序。
+- ⚠️ 开截图时脚本自动带 `--no-uninstall`,并在每个套件跑完后**立刻** adb 拉取:
+  `android/app/build.gradle.kts` 配了 `clearPackageData = true`(**每轮跑之前**清空应用数据),
+  跑完 App 还会被卸载,不"跑一个拉一个"就什么都留不下。
+- 截图拉取走 adb,**只支持 Android**;iOS 模拟器需自行从容器目录取。
+
+单独跑某一个套件(不带截图收集):
+
 ```bash
 dart pub global activate patrol_cli
 patrol doctor                       # 校验环境
 patrol test -t patrol_test/app_smoke_test.dart       # 合成链路(需 Android 设备/模拟器)
 patrol test -t patrol_test/conversation_test.dart    # 对话双模式(音频 + 文本)
 patrol test -t patrol_test/settings_test.dart        # 设置两级结构 + 各分类子页 + 清理缓存
+patrol test -t patrol_test/knowledge_test.dart       # v1.0.2 知识库:下载嵌入模型 → 导入 → 索引 → 检索试跑
+patrol test -t patrol_test/memory_test.dart          # v1.0.2 长期记忆:对话提炼 → 分组管理 → 删除
+patrol test -t patrol_test/context_injection_test.dart # v1.0.2 上下文注入 + 未注册说话人零记忆
 ```
 
 - Android 原生配置:`android/app/build.gradle.kts` 配了 `PatrolJUnitRunner` +
   AndroidX Test Orchestrator;`MainActivityTest.java` 位于
   `android/app/src/androidTest/java/top/ued17/tts/`。
-- 测试通过 `patrol_test/test_deps.dart` 注入假下载器/假引擎/假播放器,不依赖真实网络与模型。
+- 测试通过 `patrol_test/test_deps.dart` 注入假下载器/假引擎/假播放器/假嵌入引擎,
+  不依赖真实网络与真实模型(嵌入模型也由假下载器按目录声明的**精确体积**落盘,
+  以跑通"多文件 raw 下载 → 逐文件体积校验 → 就绪"这条链路)。
 - **iOS**:patrol 的 iOS UI 测试目标需在 macOS + Xcode 上配置(骨架见
   `ios/RunnerUITests/RunnerUITests.m`),本仓库已含该文件。
 
 #### 截图
 
 测试内通过 `patrol_test/screenshot_helper.dart` 的 `takeScreenshot(tester, name)`
-用 `RepaintBoundary` + `toImage()` 把当前界面保存为 PNG,写入应用文档目录
-`.../app_flutter/screenshots/<name>.png`。跑完测试后用 `--no-uninstall` 保留 App 再拉取:
+用 `RepaintBoundary` + `toImage()` 把当前界面保存为 PNG,写入**设备上**的应用文档目录
+`.../app_flutter/screenshots/<name>.png`(**默认就截**,`--dart-define=E2E_SCREENSHOTS=false` 关)。
+
+日常直接用 `sh scripts/patrol_e2e.sh` 即可 —— 它会带 `--no-uninstall` 跑、并在每个套件
+结束后立刻把图拉到 `screenshots/<套件>/`。手工拉单张:
 
 ```bash
 patrol test -t patrol_test/app_smoke_test.dart -d emulator-5554 --no-uninstall
-# 拉取截图(Windows,替换包名为你的 applicationId)
+# 拉取截图(Windows,包名替换为你的 applicationId)
 adb exec-out run-as top.ued17.tts cat app_flutter/screenshots/01_home.png > 01_home.png
 ```
 
@@ -204,6 +270,30 @@ bash scripts/build-ios.sh
 - 设计源:`assets/icon/app_icon.svg`(圆角渐变底 + 声波柱 + "TTS" 字样)。
 - 1024 PNG:由 SVG 转换生成(`assets/icon/app_icon.png`)。
 - 各平台图标:运行 `dart run flutter_launcher_icons` 生成 Android mipmap 与 iOS AppIcon。
+
+## 隐私边界(务必阅读)
+
+**语音识别 / 合成 / 声纹 / 声音克隆 / 文本向量化全部离线**,不联网。
+唯一联网的组件是**大模型(LLM)**,由你自己配置 API Key 并自付费用。
+
+但正因为它联网,以下数据会被发送到第三方 LLM 服务商:
+
+1. **当前对话内容**(含最近若干轮原文)。这是从 v1.0.0 起就有的行为。
+2. **检索命中的知识库片段**。注入的是**命中的那几段**(不是整库),
+   但命中片段同样可能含敏感信息 —— 导入文档前请先想清楚。
+3. **关于当前说话人的长期记忆**。这类"事实"是从对话里推断出来的,同样会随提示词发出。
+4. **会话摘要**。它是你对话内容的压缩结果。
+
+另有两点需要注意:
+
+- **知识库、长期记忆、会话摘要都以明文存于本地 SQLite**,未加密。本机可读。
+- **长期记忆抽取会额外消耗 token**:每次抽取都会把"最近若干轮 + 已有记忆"一起发给模型。
+  可在 设置 → 记忆 关闭。
+
+**跨人隔离**:未识别的说话人**既不产生记忆、也不会被注入任何记忆** ——
+即使库里存着别人的记忆。这是本版唯一一条真正的隔离保证,并有回归测试守住。
+但请注意:**声纹本身不是安全边界**(可重放、可合成、判定是模糊的),
+所以涉及敏感信息时不要把它当作唯一门禁。
 
 ## 平台说明
 
