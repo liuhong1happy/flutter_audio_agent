@@ -25,6 +25,7 @@ void main() {
       delayPerSegment: const Duration(milliseconds: 400),
     );
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 200)),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),
@@ -81,6 +82,7 @@ void main() {
     final tempDir = Directory.systemTemp.createTempSync('stats_');
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 100)),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),
@@ -135,6 +137,7 @@ void main() {
     final tempDir = Directory.systemTemp.createTempSync('chunk_');
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 20)),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),
@@ -180,6 +183,7 @@ void main() {
     final tempDir = Directory.systemTemp.createTempSync('comma_');
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: Duration.zero),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),
@@ -223,6 +227,7 @@ void main() {
     final tempDir = Directory.systemTemp.createTempSync('chunk_fix_');
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: Duration.zero),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),
@@ -291,6 +296,7 @@ void main() {
     );
     final engine = FakeTtsEngine(segmentDuration: const Duration(milliseconds: 5));
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: engine,
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),

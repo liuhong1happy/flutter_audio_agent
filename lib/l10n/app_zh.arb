@@ -168,6 +168,36 @@
   "noSpeakers": "尚未注册说话人。",
   "enrollSegmentsHint": "请录 2–3 段语音(每段 2 秒以上)",
 
+  "voiceprintModelLabel": "声纹模型",
+  "currentVoiceprintModel": "当前声纹模型:{name}",
+  "@currentVoiceprintModel": {
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "voiceprintModelIsolationHint": "不同模型的声纹档案互相独立,嵌入不可跨模型比较。",
+  "voiceprintGateLabel": "声纹门禁(仅注册者可对话)",
+  "voiceprintGateRejected": "抱歉,我无法确认你的身份,已停止对话。",
+  "voiceprintGateNoProfiles": "已开启声纹门禁,但当前模型下没有任何声纹,拒绝启动对话。",
+  "voiceprintGateUnavailable": "未配置对话发音,门禁无法播报拒绝语,已静默拒绝。",
+  "requireAuthForEnroll": "注册/删除声纹需设备认证",
+  "enrollAuthReason": "验证身份以修改声纹档案",
+  "authUnavailableTitle": "设备认证不可用",
+  "authUnavailableBody": "本设备未设置指纹 / 人脸 / PIN,无法用设备认证保护声纹档案的修改。你可以关闭该保护继续使用,但本机任何人都能注册声纹并通过识别。",
+  "authDisableProtection": "关闭该保护",
+  "otherVoiceprintModelHint": "另有 {count} 位注册在「{model}」下",
+  "@otherVoiceprintModelHint": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "model": {"type": "String"}
+    }
+  },
+  "bindCloneVoice": "绑定克隆音",
+  "bindCloneHint": "绑定后此人说话时用该克隆音回复。",
+  "unbind": "解绑",
+  "cloneVoiceBound": "克隆音:{name}",
+  "@cloneVoiceBound": {
+    "placeholders": {"name": {"type": "String"}}
+  },
+
   "conversationSettingsTitle": "对话设置",
   "llmProvider": "服务商",
   "llmProviderCustom": "自定义",

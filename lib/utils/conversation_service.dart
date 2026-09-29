@@ -233,6 +233,15 @@ class ConversationService extends ChangeNotifier {
 
   Future<void> start() async {
     try {
+      // 门禁 fail-closed:开了门禁却一个声纹都没注册,白名单就是空的,放行
+      // 等于没门禁。宁可拒绝启动并说明原因,也不给用户虚假的安全感。
+      // 判据是"任何模型下"——identify 是跨模型并集,只看当前模型会误判。
+      if (_settings.voiceprintGateEnabled && !_voiceprint.hasAnyProfiles) {
+        _lastError = 'voiceprintGateNoProfiles';
+        _phase = ConversationPhase.error;
+        notifyListeners();
+        return;
+      }
       final ok = await _mic.hasPermission();
       if (!ok) {
         _lastError = 'micPermissionDenied';
@@ -425,10 +434,26 @@ class ConversationService extends ChangeNotifier {
 
   Future<void> _handleSegment(Float32List samples) async {
     if (_muted) return;
+
+    // 1. 声纹识别说话人。
+    //    刻意放在 ASR **之前**:门禁拒绝时可以直接返回,省掉 ASR + LLM
+    //    两次推理 —— 拒绝比放行便宜。identify 只需要音频段,不需要文本。
+    _phase = ConversationPhase.identifying;
+    notifyListeners();
+    final name = await _voiceprint.identify(samples, 16000);
+    _currentSpeaker = name.isEmpty ? null : name;
+    notifyListeners();
+
+    // 2. 声纹门禁:不在白名单的人不转写、不落库、不问 LLM。
+    if (_settings.voiceprintGateEnabled && _currentSpeaker == null) {
+      await _rejectByGate();
+      return;
+    }
+
     _phase = ConversationPhase.asr;
     notifyListeners();
     try {
-      // 1. ASR 转写。
+      // 3. ASR 转写。
       final result = await _asr.recognize(samples, 16000);
       final text = result.text.trim();
       if (text.isEmpty) {
@@ -437,14 +462,7 @@ class ConversationService extends ChangeNotifier {
         return;
       }
 
-      // 2. 声纹识别说话人。
-      _phase = ConversationPhase.identifying;
-      notifyListeners();
-      final name = await _voiceprint.identify(samples, 16000);
-      _currentSpeaker = name.isEmpty ? null : name;
-      notifyListeners();
-
-      // 3. 追加用户消息(落库 + 内存)。
+      // 4. 追加用户消息(落库 + 内存)。
       final userMsg = await _persist(ConversationMessage(
         role: ConversationRole.user,
         content: text,
@@ -453,10 +471,10 @@ class ConversationService extends ChangeNotifier {
       ));
       _messages.add(userMsg);
 
-      // 4. 停止麦克风,防自听反馈。
+      // 5. 停止麦克风,防自听反馈。
       await _stopMicStream();
 
-      // 5. LLM 流式。
+      // 6. LLM 流式。
       _phase = ConversationPhase.thinking;
       _streamingText = '';
       notifyListeners();
@@ -545,6 +563,37 @@ class ConversationService extends ChangeNotifier {
 
   // ── 合成播放 ──────────────────────────────────────────────────────
 
+  /// 声纹门禁的拒绝语(由 UI 按当前语言注入,服务本身拿不到 l10n)。
+  String voiceprintGateReply = '抱歉,我无法确认你的身份,已停止对话。';
+
+  /// 门禁拒绝:只播本地合成的拒绝语,不落库、不问 LLM。
+  ///
+  /// 复用 [_speakReply]:它已经处理了停麦(防自听反馈)、分块合成、
+  /// 播完后 [_onPlaybackDrained] 恢复麦克风 —— 拒绝语不会被自己的麦克风
+  /// 听到而再次触发。
+  Future<void> _rejectByGate() async {
+    await _stopMicStream();
+
+    // 没有可用发音(比如克隆音被删了):静默拒绝,别把对话卡在 error。
+    if (!_hasUsableVoice()) {
+      _lastError = '未配置对话发音,门禁无法播报拒绝语';
+      _phase = ConversationPhase.listening;
+      notifyListeners();
+      await _resumeMic();
+      return;
+    }
+
+    await _speakReply(voiceprintGateReply);
+
+    // 合成/播放失败时 _speakReply 内部会把 phase 置为 error 且不恢复麦克风,
+    // 门禁不能因此把整个对话卡死:退回 listening 继续听。
+    if (_phase == ConversationPhase.error) {
+      _phase = ConversationPhase.listening;
+      notifyListeners();
+      await _resumeMic();
+    }
+  }
+
   Future<void> _speakReply(String text) async {
     await _chunker.ensureInitialized();
     final segments = _chunker.chunk(text);
@@ -600,6 +649,15 @@ class ConversationService extends ChangeNotifier {
   }
 
   ConversationVoice _currentVoice() {
+    // 说话人绑定的克隆音优先:谁说话就用谁的克隆音回。没绑(或绑的克隆音
+    // 已被删)才回落到全局设置。
+    final speaker = _currentSpeaker;
+    if (speaker != null) {
+      final bound = _voiceprint.profileOf(speaker)?.cloneId;
+      if (bound != null && _cloning.byId(bound) != null) {
+        return CloneVoice(cloneId: bound);
+      }
+    }
     if (_settings.conversationVoiceType == ConversationVoiceType.clone &&
         _settings.conversationCloneId != null) {
       return CloneVoice(cloneId: _settings.conversationCloneId!);

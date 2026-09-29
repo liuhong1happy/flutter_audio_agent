@@ -13,14 +13,28 @@
    - **音频模式**:语音 → 离线 ASR → 声纹识别 → 在线 LLM → TTS 语音回复,仅显示最后一轮;
    - **文本模式**:打字 → 在线 LLM 纯文本回复(不转 TTS),显示全部历史。
    会话历史为**单一时间线**(多说话人,未知说话人访客模式),存 SQLite 并按时间排序、分页。
-5. **声音克隆** — PocketTTS 零样本克隆音(录 3–10s 参考)。
-6. **声纹识别** — 3D-Speaker 声纹注册(整页 + 圆形居中录音按钮,支持连续注册多个说话人)/ 识别 / 删除。
-7. **多服务商 LLM** — OpenAI 兼容接口,内置 DeepSeek(`deepseek-v4-flash`/`deepseek-v4-pro`)/
+5. **声音克隆** — PocketTTS 零样本克隆音(录 3–10s 参考)。对话中可选**模型音色或克隆音**,
+   也可把克隆音**绑定到某位说话人**——谁说话就用谁的克隆音回话。
+6. **声纹识别(双模型)** — 3D-Speaker 的两个声纹模型(ERes2Net / CAMPPlus)可在录入时选择并
+   记住上次选择;**档案按模型隔离**(同一名字可在两个模型下各存一份),识别时对每个有档案的
+   模型各跑一遍取匹配。注册(整页 + 圆形居中录音按钮,支持连续注册多个)/ 识别 / 删除 / 测试识别。
+7. **对话声纹门禁** — 开启后只有声纹库中注册过的人能触发对话:未注册者**不转写、不入库、
+   不问 LLM**,只播本地合成的拒绝语。(识别先于 ASR,所以拒绝比放行更省算力。)
+8. **声纹写操作保护** — 注册 / 删除声纹、调声纹阈值前要求设备认证(指纹 / 人脸 / 系统 PIN,
+   `local_auth`),避免本机任何人都能注册声纹后通过识别。
+9. **多服务商 LLM** — OpenAI 兼容接口,内置 DeepSeek(`deepseek-v4-flash`/`deepseek-v4-pro`)/
    Moonshot(Kimi)/ 智谱(GLM)/ 通义千问(Qwen)预设,可自定义 baseUrl / apiKey / 模型。
-8. **历史浏览 + 管理** — 对话页 Header 左侧历史入口,分页「加载更早」;长按气泡删除单条消息。
+10. **历史浏览 + 管理** — 对话页 Header 左侧历史入口,分页「加载更早」;长按气泡删除单条消息。
 
 > **隐私说明**:LLM 是唯一联网组件(OpenAI 兼容第三方服务);ASR/TTS/克隆/声纹/VAD 全部离线。
 > API Key 明文存于本地 SharedPreferences(demo 可接受,请勿提交真实 key 到仓库)。
+>
+> ⚠️ **声纹不是安全因子**:`local_auth` 门禁与对话门禁都只是**便利性防护**,不是安全边界。
+> 具体原因:① 3 秒录音即可重放通过,而本应用的采样恰好就是硬编码 3 秒;② 本应用自带
+> PocketTTS 零样本克隆,拿到样本即可合成授权人声音;③ 判定是 192 维嵌入的余弦阈值,是
+> 同人/异人的权衡点而非密码学的对错;④ 嵌入以**明文 JSON** 落盘(dva ReduxPersistor,不是
+> Keystore/Keychain),本机读出即可注入他人嵌入冒充。对话内容会发给第三方 LLM,若涉及敏感
+> 信息,请勿把声纹当作唯一门禁。
 
 ## 技术栈
 
@@ -34,6 +48,7 @@
 | 播放 | `audioplayers`(WAV 顺序播放) |
 | 状态/持久化 | `flutter_dva`(dva 模型 + ReduxPersistor,配置/克隆/声纹)+ `provider`(运行时 ChangeNotifier) |
 | 会话历史 | `sqflite`(SQLite,`version`+`onUpgrade` 版本化迁移,单一时间线 + 分页) |
+| 设备认证 | `local_auth ^3.0.2`(声纹档案写操作前校验指纹/人脸/PIN,`biometricOnly: false` 允许 PIN 兜底) |
 | 应用图标 | `assets/icon/app_icon.svg`(含 TTS 信息)→ PNG,`flutter_launcher_icons` 生成各尺寸 |
 | 集成测试 | `patrol ^4.9.0` |
 
@@ -42,15 +57,26 @@
 
 ## 内置模型目录
 
-下载前缀(按种类):`tts-models`(TTS/克隆)、`asr-models`(ASR/VAD)、`speaker-recongition-models`(声纹)。
+下载前缀(按种类):`tts-models`(TTS/克隆)、`asr-models`(ASR/VAD)、`speaker-recongition-models`(声纹;
+基址名是官方 release 的拼写,带 typo,勿"纠正")。全部条目定义在 `lib/data/model_catalog.dart`。
 
-| 模型 | 音色 | 大小 | 采样率 | 说明 |
-|---|---|---|---|---|
-| vits-piper-zh_CN-xiao_ya-medium-int8 | 1 | ~13MB | 22.05kHz | 默认,最小最快 |
-| vits-zh-hf-fanchen-C | 187 | ~114MB | 16kHz | 通用中文多音色 |
-| vits-melo-tts-zh_en | 1 | ~159MB | 44.1kHz | 中英混读(MIT) |
-| vits-zh-hf-theresa | 804 | ~115MB | 22.05kHz | 音色最多 |
-| kokoro-multi-lang-v1_0 | 53 | ~333MB | 24kHz | 最佳中英混读(Apache-2.0) |
+| 种类 | 模型 | 音色 | 大小 | 采样率 | 说明 |
+|---|---|---|---|---|---|
+| TTS | vits-piper-zh_CN-xiao_ya-medium-int8 | 1 | ~13MB | 22.05kHz | 默认,最小最快 |
+| TTS | vits-zh-hf-fanchen-C | 187 | ~114MB | 16kHz | 通用中文多音色 |
+| TTS | vits-melo-tts-zh_en | 1 | ~159MB | 44.1kHz | 中英混读(MIT) |
+| TTS | vits-zh-hf-theresa | 804 | ~115MB | 22.05kHz | 音色最多 |
+| TTS | kokoro-multi-lang-v1_0 | 53 | ~333MB | 24kHz | 最佳中英混读(Apache-2.0) |
+| ASR | sherpa-onnx-paraformer-zh-2023-09-14 | — | ~223MB | 16kHz | 对话默认中文识别 |
+| ASR | sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17 | — | ~155MB | 16kHz | 中英日韩粤,附情绪/语种 |
+| 声纹 | 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k | — | ~38MB | 16kHz | 192 维声纹嵌入,**默认** |
+| 声纹 | 3dspeaker_speech_campplus_sv_zh-cn_16k-common | — | ~27MB | 16kHz | 192 维声纹嵌入,跨域更稳 |
+| VAD | silero_vad | — | ~0.6MB | 16kHz | 语音活动检测 |
+| 克隆 | sherpa-onnx-pocket-tts-int8-2026-01-26 | — | ~94MB | 24kHz | PocketTTS 零样本克隆 |
+
+> **两个声纹模型的嵌入不可互换**:两者维度同为 192,所以混用不会报错,但识别分数会变成噪音。
+> 应用层用"档案按模型分桶"来避免这一点——换模型不会让已注册的人失效,但同名档案在两个模型下
+> 是两份独立的记录(`lib/utils/voiceprint_service.dart`)。
 
 国内网络访问 GitHub 较慢时,可在 **TTS 设置 → 下载镜像** 切换镜像前缀。
 
@@ -63,6 +89,11 @@ flutter run            # 需已连接 Android 设备/模拟器(或配置 iOS 模
 
 首次使用:设置 → 语音合成 下载 `Piper 晓雅(int8)` 并选择 → 主页输入文本合成;
 对话功能在 设置 → 对话初始化(或对话页一键下载三件套)后使用。
+
+声纹:设置 → 声纹识别 → 下载至少一个声纹模型(ERes2Net 或 CAMPPlus,可都下)→
+「注册说话人」录入(每段 2 秒以上,录 2–3 段)。之后对话中会自动识别说话人并把名字与备注
+注入 LLM 上下文;想要门禁就在同一页打开「声纹门禁」。**注册/删除声纹前会要求设备认证**,
+设备没设指纹/PIN 时会弹说明让你显式关闭该保护(不会静默放行)。
 
 ## 代码结构
 
@@ -77,13 +108,14 @@ lib/
 ├── pages/                        # 页面
 │   ├── main_shell.dart           # 底部导航骨架
 │   ├── synthesize/  conversation/  history/  settings/  clone_voices/  voiceprint/
+│   │   └── voiceprint/utils/     # record_samples / voiceprint_auth(写操作前的设备认证守卫)
 ├── data/                         # 数据处理
 │   ├── models/                   # TtsModel / TtsSettings / ConversationMessage
 │   ├── dva/                      # flutter_dva:app_models + app_dva
 │   └── (model_catalog / downloader / manager / resolver / extractor / app_paths / conversation_store)
 ├── utils/                        # 其他帮助方法 + 服务 + 引擎
-│   ├── engines/                  # tts / vad / asr / speaker / pocket 引擎
-│   └── (services / 文本管线 / wav / isolate_bridge / 播放器 / llm / mic)
+│   ├── engines/                  # tts / vad / asr / speaker(按 modelId 分槽) / pocket 引擎
+│   └── (services / app_lock_service / 文本管线 / wav / isolate_bridge / 播放器 / llm / mic)
 └── l10n/                         # gen-l10n 生成(勿手改)
 test/                             # 单元测试 + widget 冒烟(fakes 见 test/support/)
 patrol_test/                      # Patrol 集成测试(app_smoke / conversation / settings)
@@ -180,8 +212,13 @@ bash scripts/build-ios.sh
   sherpa-onnx 通过 federated 插件打包原生 `.so`。
   Gradle 依赖在国内网络下的下载问题已通过 `android/settings.gradle.kts` 的阿里云镜像与
   `android/gradle/wrapper/gradle-wrapper.properties` 的腾讯镜像解决。
+  设备认证(`local_auth`)另需两处配置,已就位:`AndroidManifest.xml` 的
+  `USE_BIOMETRIC` 权限,以及 `MainActivity` 必须继承 **`FlutterFragmentActivity`**
+  (BiometricPrompt 要求 FragmentActivity,继承 `FlutterActivity` 会让 `authenticate()`
+  直接抛异常、设备认证被判为不可用)。
 - **iOS**:bundle id `top.ued17.tts`;deployment target 13+/A12+;Flutter 3.44 使用
-  Swift Package Manager 集成插件。Windows 环境无法构建 iOS,请在 macOS 上执行
+  Swift Package Manager 集成插件。`Info.plist` 已加 `NSFaceIDUsageDescription`(设备认证
+  用 Face ID 时必需,缺此键会直接失败)。Windows 环境无法构建 iOS,请在 macOS 上执行
   `flutter build ios` / patrol iOS 测试验证。
 
 ## 许可

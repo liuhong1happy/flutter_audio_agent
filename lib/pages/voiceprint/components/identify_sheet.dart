@@ -38,11 +38,22 @@ class _IdentifySheetState extends State<IdentifySheet> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    // 显示当前模型:"录了却认不出"多半就是模型对不上,提示放在现场最有效。
+    final service = context.watch<VoiceprintService>();
+    final currentName = service.displayNameOf(service.currentModelId);
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (currentName != null) ...[
+            Text(
+              l10n.currentVoiceprintModel(currentName),
+              key: const ValueKey('identifyModelLabel'),
+              style: AppText.caption,
+            ),
+            const SizedBox(height: 12),
+          ],
           FilledButton.tonalIcon(
             onPressed: _recording ? null : _identify,
             icon: Icon(_recording ? Icons.mic : Icons.mic_none),

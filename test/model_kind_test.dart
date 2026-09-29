@@ -64,6 +64,24 @@ void main() {
     expect(r.modelPath, endsWith(model.rawFileName!));
   });
 
+  test('CAMPPlus 声纹模型同样走裸 onnx 分支', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    final model =
+        ModelCatalog.byId('3dspeaker_speech_campplus_sv_zh-cn_16k-common')!;
+    File('${d.path}/${model.rawFileName}').writeAsBytesSync(List.filled(100, 1));
+
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.modelPath, endsWith(model.rawFileName!));
+
+    // 两个声纹模型的文件名不同 —— 同一个目录里不会互相误匹配。
+    expect(
+      model.rawFileName,
+      isNot(ModelCatalog.byId(kLegacyVoiceprintModelId)!.rawFileName),
+    );
+  });
+
   test('vad 裸 onnx 解析', () {
     final d = makeDir();
     addTearDown(() => d.deleteSync(recursive: true));
@@ -106,6 +124,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final tempDir = Directory.systemTemp.createTempSync('raw_');
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: Duration.zero),
       downloader: _RawDownloader(),
       chunker: TextChunker(enableJieba: false),

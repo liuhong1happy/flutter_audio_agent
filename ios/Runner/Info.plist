@@ -49,6 +49,9 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- 声纹档案的写操作(录入/删除)前要求设备认证;缺此键时 Face ID 会直接失败。 -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>用于在注册或删除声纹档案前验证你的身份</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

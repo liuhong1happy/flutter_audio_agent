@@ -26,6 +26,7 @@ void main() {
     final llm = FakeLlmClient(chunks: ['你好,', '我是语音助手']);
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 300)),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),

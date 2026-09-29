@@ -32,6 +32,7 @@ void main() {
     }
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: Duration.zero),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),

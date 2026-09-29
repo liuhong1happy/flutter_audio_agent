@@ -49,6 +49,9 @@ class _ConversationPageState extends State<ConversationPage> {
     final service = context.watch<ConversationService>();
     final l10n = AppLocalizations.of(context);
 
+    // 服务层拿不到 l10n,门禁的拒绝语由这里按当前语言注入。
+    service.voiceprintGateReply = l10n.voiceprintGateRejected;
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(

@@ -34,7 +34,7 @@ class StatusBar extends StatelessWidget {
         children: [
           Chip(
             avatar: Icon(Icons.graphic_eq, size: 16, color: phaseColor),
-            label: Text(_phaseText(context, service.phase),
+            label: Text(_phaseText(context, service),
                 style: AppText.caption.copyWith(color: phaseColor)),
             visualDensity: VisualDensity.compact,
           ),
@@ -65,15 +65,19 @@ class StatusBar extends StatelessWidget {
     );
   }
 
-  static String _phaseText(BuildContext context, ConversationPhase phase) {
+  static String _phaseText(BuildContext context, ConversationService service) {
     final l10n = AppLocalizations.of(context);
-    return switch (phase) {
+    return switch (service.phase) {
       ConversationPhase.idle => l10n.initReady,
       ConversationPhase.listening => l10n.listening,
       ConversationPhase.asr || ConversationPhase.identifying => l10n.recognizing,
       ConversationPhase.thinking => l10n.thinking,
       ConversationPhase.speaking => l10n.speaking,
-      ConversationPhase.error => l10n.llmError,
+      // error 阶段不只有 LLM 错误:声纹门禁 fail-closed 拒绝启动也落在这里,
+      // 一律显示"LLM 错误"会把人引向错误的排查方向。
+      ConversationPhase.error => service.lastError == 'voiceprintGateNoProfiles'
+          ? l10n.voiceprintGateNoProfiles
+          : l10n.llmError,
     };
   }
 }

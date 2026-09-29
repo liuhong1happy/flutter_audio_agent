@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_tts_demo/utils/app_lock_service.dart';
 import 'package:flutter_tts_demo/utils/mic_recorder.dart';
 import 'package:flutter_tts_demo/data/models/conversation_message.dart';
 import 'package:flutter_tts_demo/data/conversation_store.dart';
@@ -273,6 +274,9 @@ class FakeMicRecorder implements MicRecorder {
 class FakeAsrEngine extends AsrEngine {
   String nextText = '';
 
+  /// recognize 调用次数(用来断言"门禁拒绝时根本没跑 ASR")。
+  int recognizeCalls = 0;
+
   @override
   bool get isLoaded => true;
 
@@ -285,50 +289,143 @@ class FakeAsrEngine extends AsrEngine {
   }) async {}
 
   @override
-  Future<AsrResult> recognize(Float32List samples, int sampleRate) async =>
-      AsrResult(text: nextText);
+  Future<AsrResult> recognize(Float32List samples, int sampleRate) async {
+    recognizeCalls++;
+    return AsrResult(text: nextText);
+  }
 
   @override
   void dispose() {}
 }
 
-/// 假声纹引擎:识别返回预设名字。
+/// 假声纹引擎:识别返回预设名字,并记录按模型分桶的调用。
+///
+/// `nextName` 是模型无关的兜底(老测试只设它);`nextNameByModel` 可按模型
+/// 覆盖,用来断言"两个模型互不串"。
 class FakeSpeakerEngine extends SpeakerEngine {
   String nextName = '';
+  final Map<String, String> nextNameByModel = {};
+
+  /// load 调用序列(断言切模型/重同步)。
+  final List<String> loadCalls = [];
+
+  /// modelId → 已注册的名字列表(addMulti 调用记录)。
+  final Map<String, List<String>> addedByModel = {};
+
+  /// modelId → 已删除的名字列表。
+  final Map<String, List<String>> removedByModel = {};
 
   @override
-  bool get isLoaded => true;
+  bool get isLoaded => loadCalls.isNotEmpty;
 
   @override
-  Future<void> load({required String modelPath, int numThreads = 1}) async {}
+  bool isModelLoaded(String modelId) =>
+      loadCalls.isNotEmpty && loadCalls.last == modelId;
 
   @override
-  Future<Float32List> extract(Float32List samples, int sampleRate) async =>
+  Set<String> get loadedModelIds => loadCalls.toSet();
+
+  @override
+  Future<void> load({
+    required String modelId,
+    required String modelPath,
+    int numThreads = 1,
+  }) async {
+    loadCalls.add(modelId);
+  }
+
+  @override
+  Future<Float32List> extract({
+    required String modelId,
+    required Float32List samples,
+    required int sampleRate,
+  }) async =>
       Float32List(192);
 
   @override
-  Future<bool> add(String name, Float32List embedding) async => true;
+  Future<bool> add({
+    required String modelId,
+    required String name,
+    required Float32List embedding,
+  }) async =>
+      addMulti(modelId: modelId, name: name, embeddings: [embedding]);
 
   @override
-  Future<bool> addMulti(String name, List<Float32List> embeddings) async => true;
+  Future<bool> addMulti({
+    required String modelId,
+    required String name,
+    required List<Float32List> embeddings,
+  }) async {
+    addedByModel.putIfAbsent(modelId, () => []).add(name);
+    return true;
+  }
 
   @override
-  Future<bool> remove(String name) async => true;
+  Future<bool> remove({required String modelId, required String name}) async {
+    removedByModel.putIfAbsent(modelId, () => []).add(name);
+    return true;
+  }
 
   @override
-  Future<String> search(Float32List embedding, double threshold) async =>
-      nextName;
+  Future<String> search({
+    required String modelId,
+    required Float32List embedding,
+    required double threshold,
+  }) async =>
+      nextNameByModel[modelId] ?? nextName;
 
   @override
-  Future<bool> verify(
-    String name,
-    Float32List embedding,
-    double threshold,
-  ) async =>
+  Future<bool> verify({
+    required String modelId,
+    required String name,
+    required Float32List embedding,
+    required double threshold,
+  }) async =>
       true;
 
   @override
   void dispose() {}
+}
+
+/// 假设备认证:默认可用且放行,可编程拒绝,并记录调用。
+class FakeAppLockService implements AppLockService {
+  /// isSupported 返回值(模拟"设备没设指纹/PIN")。
+  bool supported = true;
+
+  /// 认证结果(false 模拟用户取消/失败)。
+  bool result = true;
+
+  /// authenticate / ensureUnlocked 的调用理由记录。
+  final List<String> authCalls = [];
+
+  bool _unlocked = false;
+
+  @override
+  Future<bool> isSupported() async => supported;
+
+  @override
+  Future<bool> authenticate(String reason) async {
+    authCalls.add(reason);
+    return result;
+  }
+
+  @override
+  Future<bool> ensureUnlocked(
+    String reason, {
+    Duration validFor = const Duration(minutes: 5),
+  }) async {
+    if (_unlocked) return true;
+    authCalls.add(reason);
+    if (!result) return false;
+    _unlocked = true;
+    return true;
+  }
+
+  @override
+  bool get isUnlocked => _unlocked;
+
+  @override
+  void lock() => _unlocked = false;
 }
 
 /// 假 VAD 引擎:可编程触发语音段。

@@ -25,6 +25,7 @@ import 'package:flutter_tts_demo/utils/engines/pocket_tts_engine.dart';
 import 'package:flutter_tts_demo/utils/sequential_audio_player.dart';
 import 'package:flutter_tts_demo/utils/engines/speaker_engine.dart';
 import 'package:flutter_tts_demo/utils/text_chunker.dart';
+import 'package:flutter_tts_demo/utils/app_lock_service.dart';
 import 'package:flutter_tts_demo/utils/text_normalizer.dart';
 import 'package:flutter_tts_demo/utils/engines/tts_engine.dart';
 import 'package:flutter_tts_demo/utils/tts_streaming_service.dart';
@@ -53,8 +54,10 @@ class AppDependencies {
     LlmClient? llmClient,
     AudioPlaybackQueue? conversationPlayer,
     ConversationStore? conversationStore,
+    AppLockService? appLock,
   })  : engine = engine ?? SherpaTtsEngine(),
         settings = settings ?? TtsSettings(),
+        appLock = appLock ?? LocalAuthAppLockService(),
         _downloader = downloader ?? HttpModelDownloader(),
         _extractor = extractor ?? const ArchiveExtractor(),
         _normalizer = normalizer ?? TextNormalizer(),
@@ -86,6 +89,9 @@ class AppDependencies {
 
   final TtsEngine engine;
   final TtsSettings settings;
+
+  /// 设备认证门闩(保护声纹档案的写操作)。
+  final AppLockService appLock;
 
   final ModelDownloader _downloader;
   final ArchiveExtractor _extractor;
@@ -165,6 +171,9 @@ class AppDependencies {
       engine: _pocketEngine,
     );
     await voiceCloningService.load();
+    // 只读档案、不加载 onnx:声纹管理页要在冷启动就显示已注册的人,
+    // 不能依赖"先跑一次识别/录入"才把档案读出来。
+    await voiceprintService.ensureStoreLoaded();
     llmService = LlmService(settings: settings, client: _llmClient);
     final conversationStore = _conversationStore ??
         SqliteConversationStore(await _conversationDbPathProvider());

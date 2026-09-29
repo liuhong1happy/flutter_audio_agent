@@ -35,6 +35,14 @@ const Map<String, String> kDefaultConversationModelIds = {
   'tts': 'vits-piper-zh_CN-xiao_ya-medium-int8',
 };
 
+/// 首个声纹模型(= 引入多模型选择之前唯一存在的那个)。
+///
+/// 专供"老档案迁移":旧数据的声纹档案没有 modelId 字段,一律归属此模型。
+/// 不要用 [ModelCatalog.byKind] 做迁移——那按声明序取首个,有人重排目录
+/// 就会把老档案迁到别的桶里,而嵌入空间不通用,识别结果会静默变垃圾。
+const String kLegacyVoiceprintModelId =
+    '3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k';
+
 class ModelCatalog {
   const ModelCatalog();
 
@@ -141,6 +149,20 @@ class ModelCatalog {
       sampleRate: 16000,
     ),
     TtsModel(
+      id: '3dspeaker_speech_campplus_sv_zh-cn_16k-common',
+      displayName: 'CAMPPlus 声纹识别',
+      description: '说话人声纹嵌入(192 维),跨域更稳,约 27MB。',
+      url: '$kSpeakerModelsReleaseBase/'
+          '3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx',
+      tarBz2SizeBytes: 28281138,
+      license: 'Apache-2.0',
+      kind: ModelKind.speaker,
+      downloadFormat: ModelDownloadFormat.rawFile,
+      rawFileName: '3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx',
+      speakers: 0,
+      sampleRate: 16000,
+    ),
+    TtsModel(
       id: 'silero_vad',
       displayName: 'Silero VAD',
       description: '语音活动检测(对话常开麦克风用),约 0.6MB。',
@@ -186,4 +208,8 @@ class ModelCatalog {
   static List<TtsModel> multiSpeaker() => all
       .where((m) => m.kind == ModelKind.tts && m.speakers > 1)
       .toList();
+
+  /// 返回全部声纹模型(声明序,首个为默认)。
+  static List<TtsModel> speakers() =>
+      all.where((m) => m.kind == ModelKind.speaker).toList();
 }

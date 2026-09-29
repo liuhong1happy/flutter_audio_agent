@@ -10,7 +10,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts_demo/data/app_dependencies.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
-import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/utils/text_chunker.dart';
 import 'package:flutter_tts_demo/utils/wav_encoder.dart';
 
@@ -20,6 +19,7 @@ Future<(AppDependencies, Directory)> _deps() async {
   SharedPreferences.setMockInitialValues({});
   final tempDir = Directory.systemTemp.createTempSync('svc_');
   final deps = AppDependencies(
+    appLock: FakeAppLockService(),
     engine: FakeTtsEngine(segmentDuration: Duration.zero),
     downloader: FakeModelDownloader(),
     chunker: TextChunker(enableJieba: false),
@@ -76,7 +76,7 @@ void main() {
   test('声纹:enroll → identify → remove → clear', () async {
     final (deps, _) = await _deps();
     await deps.modelManager
-        .downloadModel(ModelCatalog.byKind(ModelKind.speaker)!);
+        .downloadModel(ModelCatalog.byId(kLegacyVoiceprintModelId)!);
 
     await deps.voiceprintService.enroll(
       name: '张三',

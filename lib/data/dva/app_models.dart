@@ -28,6 +28,9 @@ class SettingsState extends DvaState {
   String llmSystemPrompt = '';
   String? asrModelId;
   double voiceprintThreshold = 0.6;
+  String? voiceprintModelId;
+  bool voiceprintGateEnabled = false;
+  bool requireAuthForEnroll = true;
   double vadThreshold = 0.5;
   double vadMinSilence = 0.5;
   double vadMaxSpeech = 15.0;
@@ -52,6 +55,9 @@ class SettingsState extends DvaState {
     asrModelId = json['asrModelId'] as String?;
     voiceprintThreshold =
         (json['voiceprintThreshold'] as num?)?.toDouble() ?? 0.6;
+    voiceprintModelId = json['voiceprintModelId'] as String?;
+    voiceprintGateEnabled = json['voiceprintGateEnabled'] as bool? ?? false;
+    requireAuthForEnroll = json['requireAuthForEnroll'] as bool? ?? true;
     vadThreshold = (json['vadThreshold'] as num?)?.toDouble() ?? 0.5;
     vadMinSilence = (json['vadMinSilence'] as num?)?.toDouble() ?? 0.5;
     vadMaxSpeech = (json['vadMaxSpeech'] as num?)?.toDouble() ?? 15.0;
@@ -76,6 +82,9 @@ class SettingsState extends DvaState {
         'llmSystemPrompt': llmSystemPrompt,
         'asrModelId': asrModelId,
         'voiceprintThreshold': voiceprintThreshold,
+        'voiceprintModelId': voiceprintModelId,
+        'voiceprintGateEnabled': voiceprintGateEnabled,
+        'requireAuthForEnroll': requireAuthForEnroll,
         'vadThreshold': vadThreshold,
         'vadMinSilence': vadMinSilence,
         'vadMaxSpeech': vadMaxSpeech,
@@ -167,6 +176,24 @@ class SettingsModel extends Model<SettingsState> {
       'setVoiceprintThreshold': (s, a) {
         final st = s.getState() as SettingsState;
         st.voiceprintThreshold = (a.payload as num?)?.toDouble() ?? 0.6;
+        s.setState(st);
+        return s;
+      },
+      'setVoiceprintModelId': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.voiceprintModelId = a.payload as String?;
+        s.setState(st);
+        return s;
+      },
+      'setVoiceprintGateEnabled': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.voiceprintGateEnabled = a.payload as bool? ?? false;
+        s.setState(st);
+        return s;
+      },
+      'setRequireAuthForEnroll': (s, a) {
+        final st = s.getState() as SettingsState;
+        st.requireAuthForEnroll = a.payload as bool? ?? true;
         s.setState(st);
         return s;
       },

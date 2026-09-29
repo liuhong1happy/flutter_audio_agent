@@ -27,6 +27,7 @@ void main() {
     final engine = FakeTtsEngine(segmentDuration: Duration.zero);
     final playback = FakeAudioPlaybackQueue();
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: engine,
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),

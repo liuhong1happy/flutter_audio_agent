@@ -73,6 +73,25 @@ class TtsSettings extends ChangeNotifier {
   double _voiceprintThreshold = 0.6;
   double get voiceprintThreshold => _voiceprintThreshold;
 
+  /// 当前声纹模型 id(录入页每次可选,记住上次选择)。
+  ///
+  /// 这里只存 id,不保证它对应的模型仍存在或已下载——解析与回落
+  /// (取目录里首个已下载的声纹模型)由 VoiceprintService 负责,
+  /// 与 asrModelId 的分工保持一致。
+  String? _voiceprintModelId;
+  String? get voiceprintModelId => _voiceprintModelId;
+
+  /// 声纹门禁:开启后只有当前模型下注册过的说话人才能触发对话。
+  ///
+  /// ⚠️ 这是礼貌性门禁,不是安全边界:3 秒录音即可重放通过,本 app 自带的
+  /// 声音克隆也能合成授权人声音,嵌入本身还是明文落盘。
+  bool _voiceprintGateEnabled = false;
+  bool get voiceprintGateEnabled => _voiceprintGateEnabled;
+
+  /// 注册/删除声纹前是否要求设备认证(指纹 / 人脸 / PIN)。
+  bool _requireAuthForEnroll = true;
+  bool get requireAuthForEnroll => _requireAuthForEnroll;
+
   double _vadThreshold = 0.5;
   double get vadThreshold => _vadThreshold;
 
@@ -114,6 +133,9 @@ class TtsSettings extends ChangeNotifier {
       _llmSystemPrompt = s.llmSystemPrompt;
       _asrModelId = s.asrModelId;
       _voiceprintThreshold = s.voiceprintThreshold;
+      _voiceprintModelId = s.voiceprintModelId;
+      _voiceprintGateEnabled = s.voiceprintGateEnabled;
+      _requireAuthForEnroll = s.requireAuthForEnroll;
       _vadThreshold = s.vadThreshold;
       _vadMinSilence = s.vadMinSilence;
       _vadMaxSpeech = s.vadMaxSpeech;
@@ -214,6 +236,25 @@ class TtsSettings extends ChangeNotifier {
     _voiceprintThreshold = value;
     notifyListeners();
     await _dispatch('settings/setVoiceprintThreshold', value);
+  }
+
+  /// 切换当前声纹模型(录入页选择后调用,即为"记住上次选择")。
+  Future<void> setVoiceprintModelId(String? value) async {
+    _voiceprintModelId = value;
+    notifyListeners();
+    await _dispatch('settings/setVoiceprintModelId', value);
+  }
+
+  Future<void> setVoiceprintGateEnabled(bool value) async {
+    _voiceprintGateEnabled = value;
+    notifyListeners();
+    await _dispatch('settings/setVoiceprintGateEnabled', value);
+  }
+
+  Future<void> setRequireAuthForEnroll(bool value) async {
+    _requireAuthForEnroll = value;
+    notifyListeners();
+    await _dispatch('settings/setRequireAuthForEnroll', value);
   }
 
   Future<void> setVadThreshold(double value) async {

@@ -13,7 +13,6 @@ import 'package:flutter_tts_demo/data/models/conversation_message.dart';
 import 'package:flutter_tts_demo/utils/conversation_service.dart';
 import 'package:flutter_tts_demo/data/archive_extractor.dart';
 import 'package:flutter_tts_demo/data/model_catalog.dart';
-import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 import 'support/fakes.dart';
@@ -29,6 +28,7 @@ Future<AppDependencies> _deps({
   SharedPreferences.setMockInitialValues({});
   final tempDir = Directory.systemTemp.createTempSync('conv_');
   final deps = AppDependencies(
+    appLock: FakeAppLockService(),
     engine: FakeTtsEngine(segmentDuration: Duration.zero),
     downloader: FakeModelDownloader(),
     chunker: TextChunker(enableJieba: false),
@@ -124,7 +124,7 @@ void main() {
 
     // 下载声纹模型并注册张三。
     await deps.modelManager
-        .downloadModel(ModelCatalog.byKind(ModelKind.speaker)!);
+        .downloadModel(ModelCatalog.byId(kLegacyVoiceprintModelId)!);
     await deps.voiceprintService.enroll(
       name: '张三',
       note: '同事',
@@ -149,6 +149,82 @@ void main() {
         .content;
     expect(sys, contains('张三'));
     expect(sys, contains('同事'));
+  });
+
+  test('声纹门禁:未注册任何声纹时拒绝启动(fail-closed)', () async {
+    final deps = await _deps();
+    await deps.conversationService.downloadInitialModels(null);
+    await deps.settings.setLlmApiKey('k');
+    await deps.settings.setVoiceprintGateEnabled(true);
+
+    await deps.conversationService.start();
+
+    expect(deps.conversationService.phase, ConversationPhase.error);
+    expect(deps.conversationService.lastError, 'voiceprintGateNoProfiles');
+    expect(deps.conversationService.isMicActive, isFalse);
+  });
+
+  test('声纹门禁:不在白名单的人不跑 ASR、不落库、不问 LLM', () async {
+    final asr = FakeAsrEngine()..nextText = '帮我查一下';
+    final speaker = FakeSpeakerEngine(); // nextName 为空 = 未匹配
+    final llm = FakeLlmClient(chunks: ['好的']);
+    final vad = FakeVadEngine();
+    final deps = await _deps(asr: asr, speaker: speaker, llm: llm, vad: vad);
+
+    await deps.conversationService.downloadInitialModels(null);
+    await deps.settings.setLlmApiKey('k');
+    await deps.modelManager
+        .downloadModel(ModelCatalog.byId(kLegacyVoiceprintModelId)!);
+    await deps.voiceprintService.enroll(
+      name: '张三',
+      note: '同事',
+      samples: [Float32List(160)],
+    );
+    await deps.settings.setVoiceprintGateEnabled(true);
+
+    await deps.conversationService.start();
+    vad.emitSegment(Float32List(160));
+
+    // 等拒绝语播完、回到聆听态。
+    await _waitFor(
+      () => deps.conversationService.phase == ConversationPhase.listening,
+    );
+
+    expect(asr.recognizeCalls, 0, reason: '门禁拒绝应发生在 ASR 之前');
+    expect(llm.capturedMessages, isEmpty, reason: '拒绝不该问 LLM');
+    expect(deps.conversationService.messages, isEmpty,
+        reason: '未注册者的语音不落库');
+    expect(deps.conversationService.currentSpeaker, isNull);
+  });
+
+  test('声纹门禁:白名单内的人正常对话', () async {
+    final asr = FakeAsrEngine()..nextText = '你好';
+    final speaker = FakeSpeakerEngine()..nextName = '张三';
+    final llm = FakeLlmClient(chunks: ['好的']);
+    final vad = FakeVadEngine();
+    final deps = await _deps(asr: asr, speaker: speaker, llm: llm, vad: vad);
+
+    await deps.conversationService.downloadInitialModels(null);
+    await deps.settings.setLlmApiKey('k');
+    await deps.modelManager
+        .downloadModel(ModelCatalog.byId(kLegacyVoiceprintModelId)!);
+    await deps.voiceprintService.enroll(
+      name: '张三',
+      note: '同事',
+      samples: [Float32List(160)],
+    );
+    await deps.settings.setVoiceprintGateEnabled(true);
+
+    await deps.conversationService.start();
+    vad.emitSegment(Float32List(160));
+
+    await _waitFor(
+      () => deps.conversationService.phase == ConversationPhase.listening,
+    );
+
+    expect(asr.recognizeCalls, 1);
+    expect(llm.capturedMessages, isNotEmpty);
+    expect(deps.conversationService.currentSpeaker, '张三');
   });
 
   test('静音时忽略语音段,不产生消息', () async {
@@ -204,7 +280,7 @@ void main() {
     final deps = await _deps(asr: asr, speaker: speaker, llm: llm, vad: vad);
 
     await deps.modelManager
-        .downloadModel(ModelCatalog.byKind(ModelKind.speaker)!);
+        .downloadModel(ModelCatalog.byId(kLegacyVoiceprintModelId)!);
     await deps.voiceprintService.enroll(
       name: '张三',
       note: '同事',

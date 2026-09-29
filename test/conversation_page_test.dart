@@ -20,6 +20,7 @@ void main() {
     final tempDir = Directory.systemTemp.createTempSync('conv_page_');
 
     final deps = AppDependencies(
+      appLock: FakeAppLockService(),
       engine: FakeTtsEngine(segmentDuration: Duration.zero),
       downloader: FakeModelDownloader(),
       chunker: TextChunker(enableJieba: false),

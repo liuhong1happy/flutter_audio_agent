@@ -16,6 +16,7 @@ import '../test/support/fakes.dart';
 Future<AppDependencies> buildPatrolTestDeps() async {
   final tempDir = Directory.systemTemp.createTempSync('patrol_');
   final deps = AppDependencies(
+    appLock: FakeAppLockService(),
     // 放慢合成/播放节奏,让"播放中"状态与高亮推进可被测试观测到。
     engine: FakeTtsEngine(segmentDuration: const Duration(milliseconds: 500)),
     downloader: FakeModelDownloader(),

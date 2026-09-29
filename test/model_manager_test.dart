@@ -72,6 +72,7 @@ Future<({ModelManager manager, _ScriptedDownloader downloader})> _setup({
   SharedPreferences.setMockInitialValues({});
   final tempDir = Directory.systemTemp.createTempSync('model_mgr_');
   final deps = AppDependencies(
+    appLock: FakeAppLockService(),
     engine: FakeTtsEngine(segmentDuration: Duration.zero),
     downloader: downloader,
     chunker: TextChunker(enableJieba: false),
