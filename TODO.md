@@ -51,12 +51,14 @@ dependencies:
 
 ## 二、模型目录(全部 URL 与体积已从 k2-fsa GitHub release API 核实)
 
-### 2.1 现有 5 项(tts,勿动,列表供参考)
+### 2.1 现有 7 项(tts;晓雅为默认,列表供参考)
 来源基址:`https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models`;代理列表 `kChinaGitHubProxies = ['https://ghfast.top/','https://ghproxy.net/','https://gh-proxy.com/','https://ghps.cc/']`
 
 | id | 说明 | 字节 | speakers | sampleRate |
 |---|---|---|---|---|
 | vits-piper-zh_CN-xiao_ya-medium-int8 | Piper 晓雅 | 14,016,124 | 1 | 22050 |
+| vits-piper-zh_CN-chaowen-medium-int8 | Piper 超文(男声) | 14,011,298 | 1 | 22050 |
+| vits-piper-zh_CN-huayan-medium | Piper huayan(女声,fp32) | 67,255,926 | 1 | 22050 |
 | vits-zh-hf-fanchen-C | Fanchen C | 119,326,431 | 187 | 16000 |
 | vits-melo-tts-zh_en | MeloTTS 中英混读 | 167,006,755 | 1 | 44100 |
 | vits-zh-hf-theresa | Theresa | 120,596,617 | 804 | 22050 |

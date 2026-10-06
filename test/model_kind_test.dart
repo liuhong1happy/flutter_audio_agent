@@ -39,6 +39,49 @@ void main() {
     expect(r.ruleFsts, isNotEmpty);
   });
 
+  // 新增的两个 Piper 中文模型**结构不同**,各按真实解包结果固化一条:
+  // 目录里文件按实测命名写(见 lib/data/model_catalog.dart 里对应的注释)。
+
+  test('TTS piper chaowen:与晓雅同结构(lexicon + phone/date/number.fst)', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    File('${d.path}/zh_CN-chaowen-medium.onnx')
+        .writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+    File('${d.path}/lexicon.txt').writeAsStringSync('');
+    File('${d.path}/phone.fst').writeAsStringSync('');
+    File('${d.path}/date.fst').writeAsStringSync('');
+    File('${d.path}/number.fst').writeAsStringSync('');
+
+    final model = ModelCatalog.byId('vits-piper-zh_CN-chaowen-medium-int8')!;
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.modelPath, endsWith('zh_CN-chaowen-medium.onnx'));
+    expect(r.tokensPath, endsWith('tokens.txt'));
+    expect(r.lexiconPath, endsWith('lexicon.txt'));
+    // 声明的三个 fst **全部**能在包里找到(否则张量归一化会静默少一环)。
+    expect(r.ruleFsts, hasLength(3));
+  });
+
+  test('TTS piper huayan:走 espeak-ng-data 分支,**没有 fst/lexicon**', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    File('${d.path}/zh_CN-huayan-medium.onnx')
+        .writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+    // 真实包内是 espeak-ng-data/ 一整个目录(392 个文件)。
+    Directory('${d.path}/espeak-ng-data').createSync();
+    File('${d.path}/espeak-ng-data/phondata').writeAsStringSync('');
+
+    final model = ModelCatalog.byId('vits-piper-zh_CN-huayan-medium')!;
+    final r = resolver.resolve(model, d.path)!;
+    // 齐不齐看 dataDir,不是看 lexicon —— 这条正是"照抄晓雅"会踩错的地方。
+    expect(r.isComplete, isTrue);
+    expect(r.lexiconPath, isNull);
+    expect(r.dataDir, endsWith('espeak-ng-data'));
+    expect(r.ruleFsts, isEmpty, reason: '包内没有任何 .fst,声明 ruleFsts 也找不到');
+  });
+
   test('ASR(paraformer)解析 model+tokens', () {
     final d = makeDir();
     addTearDown(() => d.deleteSync(recursive: true));

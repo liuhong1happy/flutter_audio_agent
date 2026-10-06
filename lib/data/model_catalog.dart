@@ -80,6 +80,42 @@ class ModelCatalog {
       family: TtsModelFamily.vits,
       ruleFsts: ['phone.fst', 'date.fst', 'number.fst'],
     ),
+    // 第二个 Piper 中文基(男声)。与晓雅同一导出管线,**包结构已实测一致**
+    // (onnx + tokens.txt + lexicon.txt + phone/date/number.fst),所以解析器与
+    // 规则 fst 的接法零改动;体积也与晓雅同档(14.0 MB)。
+    TtsModel(
+      id: 'vits-piper-zh_CN-chaowen-medium-int8',
+      displayName: 'Piper 超文(中文男声, int8)',
+      description: '中文男声,14MB 档与晓雅同量级,加载快。',
+      url: '$kTtsModelsReleaseBase/vits-piper-zh_CN-chaowen-medium-int8.tar.bz2',
+      tarBz2SizeBytes: 14011298,
+      license: 'CC0(见包内 MODEL_CARD)',
+      speakers: 1,
+      sampleRate: 22050,
+      family: TtsModelFamily.vits,
+      ruleFsts: ['phone.fst', 'date.fst', 'number.fst'],
+    ),
+    // Piper 中文女声(huayan)。**上游没有 int8 版**,只有 67 MB 的 fp32,
+    // 体积是晓雅的 4.8 倍 —— 刻意排在晓雅/超文之后,不参与"默认最小"的选择。
+    //
+    // ⚠️ 与晓雅/超文**不是同一种导出**(已下包实测,勿照抄上面两条):
+    //   - `phoneme_type: espeak`(**不是 pinyin**),包内是 `tokens.txt` +
+    //     `espeak-ng-data/`(392 个文件),因此 **没有 phone/date/number.fst、
+    //     也没有 lexicon.txt** —— 故这里不声明 ruleFsts(声明了也找不到文件)。
+    //     数字/日期仍由应用自己的 `TextNormalizer` 归一化后再交给 espeak 音素化。
+    //   - 许可:MODEL_CARD 写 **Unknown**(数据集来自 PlayVoice/HuaYan_TTS)。
+    //   引擎侧走的是既有的 `ResolvedModelPaths.dataDir` 分支(Kokoro 同一条路)。
+    TtsModel(
+      id: 'vits-piper-zh_CN-huayan-medium',
+      displayName: 'Piper huayan(中文女声, fp32)',
+      description: '中文女声,espeak 音素化(无规则 fst);体积 67MB,下载较久。',
+      url: '$kTtsModelsReleaseBase/vits-piper-zh_CN-huayan-medium.tar.bz2',
+      tarBz2SizeBytes: 67255926,
+      license: 'Unknown(见包内 MODEL_CARD)',
+      speakers: 1,
+      sampleRate: 22050,
+      family: TtsModelFamily.vits,
+    ),
     TtsModel(
       id: 'vits-zh-hf-fanchen-C',
       displayName: 'Fanchen C(中文, 187 音色)',

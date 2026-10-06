@@ -67,7 +67,9 @@
 
 | 种类 | 模型 | 音色 | 大小 | 采样率 | 说明 |
 |---|---|---|---|---|---|
-| TTS | vits-piper-zh_CN-xiao_ya-medium-int8 | 1 | ~13MB | 22.05kHz | 默认,最小最快 |
+| TTS | vits-piper-zh_CN-xiao_ya-medium-int8 | 1 | ~13MB | 22.05kHz | 默认,最小最快(女声) |
+| TTS | vits-piper-zh_CN-chaowen-medium-int8 | 1 | ~13MB | 22.05kHz | 与晓雅同档的**中文男声** |
+| TTS | vits-piper-zh_CN-huayan-medium | 1 | ~64MB | 22.05kHz | 中文女声,espeak 音素化(包内无 fst);上游无 int8,仅 fp32 |
 | TTS | vits-zh-hf-fanchen-C | 187 | ~114MB | 16kHz | 通用中文多音色 |
 | TTS | vits-melo-tts-zh_en | 1 | ~159MB | 44.1kHz | 中英混读(MIT) |
 | TTS | vits-zh-hf-theresa | 804 | ~115MB | 22.05kHz | 音色最多 |
