@@ -13,6 +13,7 @@ import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_downloader.dart';
 import 'package:flutter_tts_demo/data/model_files_resolver.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/utils/text_chunker.dart';
 
 import 'support/fakes.dart';
@@ -93,6 +94,91 @@ void main() {
     expect(r.isComplete, isTrue);
     expect(r.modelPath, endsWith('model.onnx'));
     expect(r.tokensPath, endsWith('tokens.txt'));
+  });
+
+  test('ASR(dolphin)解析 model.int8+tokens', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    File('${d.path}/model.int8.onnx').writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+
+    final model = ModelCatalog.byId(
+      'sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02',
+    )!;
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.modelPath, endsWith('model.int8.onnx'));
+    expect(r.tokensPath, endsWith('tokens.txt'));
+  });
+
+  test('ASR(sensevoice 粤语版)仍走单模型+tokens', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    File('${d.path}/model.int8.onnx').writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+
+    final model = ModelCatalog.byId(
+      'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
+    )!;
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.modelPath, endsWith('model.int8.onnx'));
+    expect(r.kind, ModelKind.asrSenseVoice);
+  });
+
+  test('ASR(x-asr transducer)按角色解析 encoder/decoder/joiner', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    // 真实包:encoder/joiner 是 int8,decoder 只有 fp32。
+    File('${d.path}/encoder-epoch-99-avg-1.int8.onnx')
+        .writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/decoder-epoch-99-avg-1.onnx')
+        .writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/joiner-epoch-99-avg-1.int8.onnx')
+        .writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+
+    final model = ModelCatalog.byId(
+      'sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03',
+    )!;
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.transducer!.encoder, endsWith('encoder-epoch-99-avg-1.int8.onnx'));
+    expect(r.transducer!.decoder, endsWith('decoder-epoch-99-avg-1.onnx'));
+    expect(r.transducer!.joiner, endsWith('joiner-epoch-99-avg-1.int8.onnx'));
+
+    // 缺 joiner 即判为不完整,不能把空路径带进引擎。
+    File('${d.path}/joiner-epoch-99-avg-1.int8.onnx').deleteSync();
+    final r2 = resolver.resolve(model, d.path)!;
+    expect(r2.isComplete, isFalse);
+  });
+
+  test('TTS(kokoro int8 v1_1)复用 fp32 布局,lexicon 只选 lexicon-*', () {
+    final d = makeDir();
+    addTearDown(() => d.deleteSync(recursive: true));
+    File('${d.path}/model.int8.onnx').writeAsBytesSync(List.filled(100, 1));
+    File('${d.path}/tokens.txt').writeAsStringSync('');
+    File('${d.path}/lexicon-us-en.txt').writeAsStringSync('');
+    File('${d.path}/lexicon-zh.txt').writeAsStringSync('');
+    File('${d.path}/date-zh.fst').writeAsStringSync('');
+    File('${d.path}/number-zh.fst').writeAsStringSync('');
+    File('${d.path}/phone-zh.fst').writeAsStringSync('');
+    File('${d.path}/voices.bin').writeAsBytesSync(List.filled(100, 1));
+    Directory('${d.path}/espeak-ng-data').createSync();
+    File('${d.path}/espeak-ng-data/phondata').writeAsStringSync('');
+
+    final model = ModelCatalog.byId('kokoro-int8-multi-lang-v1_1')!;
+    // 实测 voices.bin 为 103 个音色,不要照抄 v1_0 的 53。
+    expect(model.speakers, 103);
+    final r = resolver.resolve(model, d.path)!;
+    expect(r.isComplete, isTrue);
+    expect(r.modelPath, endsWith('model.int8.onnx'));
+    expect(r.voicesPath, endsWith('voices.bin'));
+    expect(r.dataDir, endsWith('espeak-ng-data'));
+    // 关键:中文词典只能是 lexicon-zh.txt,不能是 date/number/phone-zh.fst。
+    expect(r.lexiconPath, contains('lexicon-us-en.txt'));
+    expect(r.lexiconPath, contains('lexicon-zh.txt'));
+    expect(r.lexiconPath, isNot(contains('.fst')));
   });
 
   test('speaker 裸 onnx 按 rawFileName 解析', () {

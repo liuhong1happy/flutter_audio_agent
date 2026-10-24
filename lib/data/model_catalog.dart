@@ -166,6 +166,24 @@ class ModelCatalog {
       ruleFsts: [],
       multilingual: true,
     ),
+    // Kokoro v1.1-zh 的 int8 包。文件布局与上面的 fp32 v1_0 **一致**
+    // (model.int8.onnx + tokens + lexicon-us-en/zh + voices.bin + espeak-ng-data),
+    // 所以 resolver / TTS 引擎零改动;只是体积从 334MB 降到 140MB。
+    // 音色数已实测:voices.bin = 53,790,720 B ÷ (510×256×4) = **103**,
+    // 且 Windows 桌面实测 `tts.numSpeakers` 返回 103 —— 不要照抄 v1_0 的 53。
+    TtsModel(
+      id: 'kokoro-int8-multi-lang-v1_1',
+      displayName: 'Kokoro int8(中英混读, 103 音色)',
+      description: 'Kokoro v1.1-zh 的 int8 版,103 音色,约 140MB,下载和加载更快。',
+      url: '$kTtsModelsReleaseBase/kokoro-int8-multi-lang-v1_1.tar.bz2',
+      tarBz2SizeBytes: 147031220,
+      license: 'Apache-2.0(依赖 eSpeak-ng GPL)',
+      speakers: 103,
+      sampleRate: 24000,
+      family: TtsModelFamily.kokoro,
+      ruleFsts: [],
+      multilingual: true,
+    ),
 
     // ── 对话/克隆/声纹相关(新增)─────────────────────────────────────
 
@@ -188,6 +206,48 @@ class ModelCatalog {
       tarBz2SizeBytes: 163002883,
       license: 'Apache-2.0',
       kind: ModelKind.asrSenseVoice,
+      speakers: 0,
+      sampleRate: 16000,
+    ),
+    // SenseVoice 的粤语增强版,转换自 ASLP-lab/WSYue-ASR。
+    // 包结构与上面的 2024-07-17 版一致(model.int8.onnx + tokens.txt),
+    // 所以沿用 asrSenseVoice 分支,只加 catalog。
+    TtsModel(
+      id: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
+      displayName: 'SenseVoice 粤语增强(int8)',
+      description: '中英日韩粤,粤语识别增强;约 158MB。',
+      url: '$kAsrModelsReleaseBase/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2',
+      tarBz2SizeBytes: 165783878,
+      license: 'Apache-2.0',
+      kind: ModelKind.asrSenseVoice,
+      speakers: 0,
+      sampleRate: 16000,
+    ),
+    // X-ASR 中英双语 zipformer transducer(2026-06,Apache-2.0)。
+    // 包内 encoder/joiner 是 int8、decoder 只有 fp32,必须按角色解析;
+    // resolver 走 asrTransducer 分支。这里选带标点的变体,对话展示更顺。
+    TtsModel(
+      id: 'sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03',
+      displayName: 'X-ASR 中英识别(带标点, int8)',
+      description: '中英双语离线识别,自带标点,约 130MB;2026-06 新模型。',
+      url: '$kAsrModelsReleaseBase/'
+          'sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03.tar.bz2',
+      tarBz2SizeBytes: 136396739,
+      license: 'Apache-2.0',
+      kind: ModelKind.asrTransducer,
+      speakers: 0,
+      sampleRate: 16000,
+    ),
+    // Dolphin:单 ONNX + tokens,40 种东方语言 + 22 种中文方言,体积小。
+    TtsModel(
+      id: 'sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02',
+      displayName: 'Dolphin 多语种识别(int8)',
+      description: '40 种东亚/南亚/东南亚/中东语言 + 22 种中文方言,约 77MB。',
+      url: '$kAsrModelsReleaseBase/'
+          'sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02.tar.bz2',
+      tarBz2SizeBytes: 80671385,
+      license: 'Apache-2.0',
+      kind: ModelKind.asrDolphin,
       speakers: 0,
       sampleRate: 16000,
     ),

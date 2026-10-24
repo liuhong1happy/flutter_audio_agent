@@ -74,8 +74,12 @@
 | TTS | vits-melo-tts-zh_en | 1 | ~159MB | 44.1kHz | 中英混读(MIT) |
 | TTS | vits-zh-hf-theresa | 804 | ~115MB | 22.05kHz | 音色最多 |
 | TTS | kokoro-multi-lang-v1_0 | 53 | ~333MB | 24kHz | 最佳中英混读(Apache-2.0) |
+| TTS | kokoro-int8-multi-lang-v1_1 | 103 | ~140MB | 24kHz | Kokoro v1.1-zh 的 int8 版,约为 fp32 v1_0 的 42% |
 | ASR | sherpa-onnx-paraformer-zh-2023-09-14 | — | ~223MB | 16kHz | 对话默认中文识别 |
 | ASR | sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17 | — | ~155MB | 16kHz | 中英日韩粤,附情绪/语种 |
+| ASR | sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09 | — | ~158MB | 16kHz | 同上,粤语增强(WSYue-ASR) |
+| ASR | sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03 | — | ~130MB | 16kHz | 中英双语,自带标点(transducer) |
+| ASR | sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02 | — | ~77MB | 16kHz | 40 种东方语言 + 22 种中文方言 |
 | 声纹 | 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k | — | ~38MB | 16kHz | 192 维声纹嵌入,**默认** |
 | 声纹 | 3dspeaker_speech_campplus_sv_zh-cn_16k-common | — | ~27MB | 16kHz | 192 维声纹嵌入,跨域更稳 |
 | VAD | silero_vad | — | ~0.6MB | 16kHz | 语音活动检测 |

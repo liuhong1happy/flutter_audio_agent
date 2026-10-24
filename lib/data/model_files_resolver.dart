@@ -40,6 +40,22 @@ class PocketModelPaths {
       tokenScoresJson.isNotEmpty;
 }
 
+/// Transducer ASR(X-ASR / Zipformer)的三个模型文件。
+class TransducerModelPaths {
+  const TransducerModelPaths({
+    required this.encoder,
+    required this.decoder,
+    required this.joiner,
+  });
+
+  final String encoder;
+  final String decoder;
+  final String joiner;
+
+  bool get isComplete =>
+      encoder.isNotEmpty && decoder.isNotEmpty && joiner.isNotEmpty;
+}
+
 /// 解析后的模型文件绝对路径集合。
 class ResolvedModelPaths {
   const ResolvedModelPaths({
@@ -52,6 +68,7 @@ class ResolvedModelPaths {
     this.ruleFsts = const [],
     this.kind = ModelKind.tts,
     this.pocket,
+    this.transducer,
     this.tokenizerJsonPath,
   });
 
@@ -78,6 +95,7 @@ class ResolvedModelPaths {
 
   final ModelKind kind;
   final PocketModelPaths? pocket;
+  final TransducerModelPaths? transducer;
 
   /// 按种类判断关键文件是否齐全。
   bool get isComplete {
@@ -88,7 +106,10 @@ class ResolvedModelPaths {
             (lexiconPath != null || dataDir != null);
       case ModelKind.asrParaformer:
       case ModelKind.asrSenseVoice:
+      case ModelKind.asrDolphin:
         return modelPath != null && tokensPath != null;
+      case ModelKind.asrTransducer:
+        return tokensPath != null && (transducer?.isComplete ?? false);
       case ModelKind.speaker:
       case ModelKind.vad:
         return modelPath != null;
@@ -127,7 +148,10 @@ class ModelFilesResolver {
         return _resolveTts(model, rootDir, allFiles, allDirs, find);
       case ModelKind.asrParaformer:
       case ModelKind.asrSenseVoice:
+      case ModelKind.asrDolphin:
         return _resolveAsr(model, rootDir, find);
+      case ModelKind.asrTransducer:
+        return _resolveTransducer(model, rootDir, find);
       case ModelKind.speaker:
       case ModelKind.vad:
         return _resolveRaw(model, rootDir, find);
@@ -166,7 +190,15 @@ class ModelFilesResolver {
     final String? lexicon;
     if (model.family == TtsModelFamily.kokoro) {
       // Kokoro 需要 lexicon-us-en.txt 与 lexicon-zh.txt 一起。
-      final zh = find(predicate: (name) => name.contains('zh'));
+      // ⚠️ 必须限定在 lexicon 文件内:包内还有 date-zh.fst / number-zh.fst /
+      // phone-zh.fst,只按 `contains('zh')` 找会把规则 fst 当成中文词典传给引擎
+      // (int8 包尤其明显),导致中文音素化静默错乱。
+      final zh = find(
+        predicate: (name) {
+          final n = name.toLowerCase();
+          return n.contains('lexicon') && n.contains('zh');
+        },
+      );
       final en = find(
         predicate: (name) =>
             name.contains('us-en') ||
@@ -230,6 +262,43 @@ class ModelFilesResolver {
       modelPath: _findModel(find),
       tokensPath: find(predicate: (name) => name == 'tokens.txt'),
       kind: model.kind,
+    );
+  }
+
+  /// Transducer(X-ASR)按角色找三个文件。
+  ///
+  /// 包里 encoder/joiner 是 int8,而 decoder 常常只有 fp32 —— 不能套用
+  /// `_findModel` 的"优先 int8"规则,否则只会找到 encoder 一个文件。
+  /// 每个角色单独匹配,且仍优先 int8。
+  ResolvedModelPaths _resolveTransducer(
+    TtsModel model,
+    String rootDir,
+    String? Function({required bool Function(String) predicate}) find,
+  ) {
+    String role(String name) {
+      final lowerName = name.toLowerCase();
+      bool match(String file) {
+        final f = file.toLowerCase();
+        return f.endsWith('.onnx') && f.contains(lowerName);
+      }
+
+      return find(
+            predicate: (file) =>
+                match(file) && file.toLowerCase().endsWith('.int8.onnx'),
+          ) ??
+          find(predicate: match) ??
+          '';
+    }
+
+    return ResolvedModelPaths(
+      rootDir: rootDir,
+      tokensPath: find(predicate: (name) => name == 'tokens.txt'),
+      kind: ModelKind.asrTransducer,
+      transducer: TransducerModelPaths(
+        encoder: role('encoder'),
+        decoder: role('decoder'),
+        joiner: role('joiner'),
+      ),
     );
   }
 

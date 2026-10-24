@@ -20,6 +20,14 @@ enum ModelKind {
   /// 离线 ASR(SenseVoice,可选,支持情绪/语言)。
   asrSenseVoice,
 
+  /// 离线 ASR(Transducer / Zipformer,如 X-ASR)。
+  ///
+  /// 与单模型 ASR 不同,这一族要 encoder / decoder / joiner 三个 ONNX。
+  asrTransducer,
+
+  /// 离线 ASR(Dolphin,亚洲多语种 + 中文方言)。
+  asrDolphin,
+
   /// 声纹嵌入提取(3D-Speaker)。
   speaker,
 

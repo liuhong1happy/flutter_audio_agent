@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:flutter_tts_demo/data/model_catalog.dart';
 import 'package:flutter_tts_demo/data/model_manager.dart';
+import 'package:flutter_tts_demo/data/models/tts_model.dart';
 import 'package:flutter_tts_demo/data/models/tts_settings.dart';
 import 'package:flutter_tts_demo/utils/engines/asr_engine.dart';
 
@@ -37,7 +38,14 @@ class AsrService {
     if (model == null) return;
     if (!_modelManager.isDownloaded(model.id)) return;
     final paths = _modelManager.resolveModel(model);
-    if (paths == null || paths.modelPath == null || paths.tokensPath == null) {
+    if (paths == null || paths.tokensPath == null) return;
+
+    // Transducer 没有单一 modelPath,而是 encoder/decoder/joiner 三件套;
+    // 其余 ASR 族仍按 model+tokens 检查。
+    final isTransducer = model.kind == ModelKind.asrTransducer;
+    if (isTransducer) {
+      if (!(paths.transducer?.isComplete ?? false)) return;
+    } else if (paths.modelPath == null) {
       return;
     }
 
@@ -45,8 +53,11 @@ class AsrService {
     try {
       await _engine.load(
         kind: model.kind.name,
-        modelPath: paths.modelPath!,
+        modelPath: paths.modelPath ?? '',
         tokensPath: paths.tokensPath!,
+        encoderPath: paths.transducer?.encoder,
+        decoderPath: paths.transducer?.decoder,
+        joinerPath: paths.transducer?.joiner,
         numThreads: _settings.numThreads,
       );
       _loadedModelId = modelId;

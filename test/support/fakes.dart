@@ -326,6 +326,9 @@ class FakeAsrEngine extends AsrEngine {
     required String kind,
     required String modelPath,
     required String tokensPath,
+    String? encoderPath,
+    String? decoderPath,
+    String? joinerPath,
     int numThreads = 2,
   }) async {}
 

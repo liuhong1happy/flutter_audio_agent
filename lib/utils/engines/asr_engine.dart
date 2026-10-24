@@ -1,4 +1,5 @@
-/// 离线 ASR 引擎:sherpa-onnx Paraformer/SenseVoice 在后台 isolate 运行。
+/// 离线 ASR 引擎:sherpa-onnx Paraformer/SenseVoice/Transducer/Dolphin
+/// 在后台 isolate 运行。
 library;
 
 import 'dart:isolate';
@@ -32,12 +33,18 @@ class AsrEngine {
     required String kind,
     required String modelPath,
     required String tokensPath,
+    String? encoderPath,
+    String? decoderPath,
+    String? joinerPath,
     int numThreads = 2,
   }) async {
     final result = await _bridge.request('load', _AsrLoadPayload(
       kind: kind,
       model: modelPath,
       tokens: tokensPath,
+      encoder: encoderPath ?? '',
+      decoder: decoderPath ?? '',
+      joiner: joinerPath ?? '',
       numThreads: numThreads,
     ));
     if (result != true) {
@@ -71,11 +78,20 @@ class _AsrLoadPayload {
     required this.kind,
     required this.model,
     required this.tokens,
+    required this.encoder,
+    required this.decoder,
+    required this.joiner,
     required this.numThreads,
   });
   final String kind;
   final String model;
   final String tokens;
+
+  /// 仅 `asrTransducer` 使用;其余族为空串。
+  final String encoder;
+  final String decoder;
+  final String joiner;
+
   final int numThreads;
 }
 
@@ -105,25 +121,44 @@ void _workerEntry(SendPort mainPort) {
           case 'load':
             final p = msg.payload as _AsrLoadPayload;
             recognizer?.free();
-            final modelConfig = p.kind == 'asrSenseVoice'
-                ? sherpa_onnx.OfflineModelConfig(
-                    senseVoice: sherpa_onnx.OfflineSenseVoiceModelConfig(
-                      model: p.model,
-                      language: 'auto',
-                      useInverseTextNormalization: true,
-                    ),
-                    tokens: p.tokens,
-                    numThreads: p.numThreads,
-                    provider: 'cpu',
-                  )
-                : sherpa_onnx.OfflineModelConfig(
-                    paraformer: sherpa_onnx.OfflineParaformerModelConfig(
-                      model: p.model,
-                    ),
-                    tokens: p.tokens,
-                    numThreads: p.numThreads,
-                    provider: 'cpu',
-                  );
+            final modelConfig = switch (p.kind) {
+              'asrSenseVoice' => sherpa_onnx.OfflineModelConfig(
+                  senseVoice: sherpa_onnx.OfflineSenseVoiceModelConfig(
+                    model: p.model,
+                    language: 'auto',
+                    useInverseTextNormalization: true,
+                  ),
+                  tokens: p.tokens,
+                  numThreads: p.numThreads,
+                  provider: 'cpu',
+                ),
+              'asrTransducer' => sherpa_onnx.OfflineModelConfig(
+                  transducer: sherpa_onnx.OfflineTransducerModelConfig(
+                    encoder: p.encoder,
+                    decoder: p.decoder,
+                    joiner: p.joiner,
+                  ),
+                  tokens: p.tokens,
+                  numThreads: p.numThreads,
+                  provider: 'cpu',
+                ),
+              'asrDolphin' => sherpa_onnx.OfflineModelConfig(
+                  dolphin: sherpa_onnx.OfflineDolphinModelConfig(
+                    model: p.model,
+                  ),
+                  tokens: p.tokens,
+                  numThreads: p.numThreads,
+                  provider: 'cpu',
+                ),
+              _ => sherpa_onnx.OfflineModelConfig(
+                  paraformer: sherpa_onnx.OfflineParaformerModelConfig(
+                    model: p.model,
+                  ),
+                  tokens: p.tokens,
+                  numThreads: p.numThreads,
+                  provider: 'cpu',
+                ),
+            };
             recognizer = sherpa_onnx.OfflineRecognizer(
               sherpa_onnx.OfflineRecognizerConfig(
                 feat: const sherpa_onnx.FeatureConfig(

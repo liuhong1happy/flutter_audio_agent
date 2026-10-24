@@ -18,11 +18,14 @@ class AsrSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<TtsSettings>();
     final l10n = AppLocalizations.of(context);
-    final asrModels = ModelCatalog.all
-        .where((m) =>
-            m.kind == ModelKind.asrParaformer ||
-            m.kind == ModelKind.asrSenseVoice)
-        .toList();
+    const asrKinds = <ModelKind>[
+      ModelKind.asrParaformer,
+      ModelKind.asrSenseVoice,
+      ModelKind.asrTransducer,
+      ModelKind.asrDolphin,
+    ];
+    final asrModels =
+        ModelCatalog.all.where((m) => asrKinds.contains(m.kind)).toList();
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.sectionAsr)),
@@ -43,8 +46,7 @@ class AsrSection extends StatelessWidget {
           ),
           const SectionDivider(),
           SectionHeader(l10n.modelDownloadLabel, Icons.cloud_download_outlined),
-          const ModelDownloadList(kind: ModelKind.asrParaformer),
-          const ModelDownloadList(kind: ModelKind.asrSenseVoice),
+          for (final kind in asrKinds) ModelDownloadList(kind: kind),
           const SizedBox(height: 32),
         ],
       ),
